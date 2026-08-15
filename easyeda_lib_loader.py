@@ -576,6 +576,10 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
                             color: #666;
                             font-size: 90%;
                         }
+                        .note {
+                            color: #666;
+                            margin: 0 0 6px 0;
+                        }
                     """
                     heading = preview_title or f"Device UUID: {itemCode}"
 
@@ -583,6 +587,14 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
                         return f'<figure>{drawing}<figcaption>{label}</figcaption></figure>' if drawing else ""
 
                     image_html = figure("Symbol", preview_symbol) + figure("Footprint", preview_footprint)
+
+                    if not image_html:
+                        # Pro devices drawn from scratch have no LCSC code, and EasyEDA
+                        # publishes no rendering of their documents. Say so, rather than
+                        # leaving a blank space that looks like a failure.
+                        image_html = ('<p class="note">No drawing published for this part.'
+                                      ' EasyEDA only renders parts that carry an LCSC part number;'
+                                      ' open it in the editor, or import it and view it in KiCad.</p>')
 
                     html_content = f"""
                     <html>
