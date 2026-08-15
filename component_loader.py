@@ -71,14 +71,29 @@ def buildStdLibShape(dataStr, extraParams, shapeId):
     return "#@$".join([root] + list(dataStr.get("shape") or []))
 
 # Read a parameter (e.g. "package") out of an EasyEDA Standard "LIB~..." shape.
-def stdShapeName(shape, key):
+def stdShapeParams(shape):
     root = shape.split("#@$")[0].split("~")
 
     if len(root) < 4:
-        return None
+        return {}
 
     params = root[3].split("`")
-    return dict(zip(params[0::2], params[1::2])).get(key)
+    return dict(zip(params[0::2], params[1::2]))
+
+
+def stdShapeName(shape, key):
+    return stdShapeParams(shape).get(key)
+
+
+# A version of this plugin that could not tell docType 2 from 4 wrapped standalone
+# footprint documents as symbols. A footprint document's c_para has no `name`, and the
+# wrapper took `spiceSymbolName` from the document title, which for a footprint is its
+# package - a combination no real symbol produces, since EasyEDA names every symbol.
+def isMisfiledFootprint(shape):
+    params = stdShapeParams(shape)
+    package = params.get("package")
+
+    return bool(package) and not params.get("name") and params.get("spiceSymbolName") == package
 
 class ComponentLoader():
     def __init__(self, kiprjmod, target_path, target_name, progress: Callable[[int, int], None], session: requests.Session):
@@ -593,7 +608,7 @@ class ComponentLoader():
         os.makedirs(self.target_path, exist_ok=True)
         zip_filename = f"{self.target_path}/{self.target_name}-std.zip"
 
-        def mergeOld(name, shapes, nameKey, getShapeList):
+        def mergeOld(name, shapes, nameKey, getShapeList, dropMisfiled=False):
             try:
                 with zipfile.ZipFile(zip_filename, "r") as old_zip:
                     if name not in old_zip.namelist():
@@ -602,16 +617,28 @@ class ComponentLoader():
                     for oldShape in getShapeList(json.loads(old_zip.read(name).decode("utf-8"))):
                         oldName = stdShapeName(oldShape, nameKey)
 
+                        if not oldName:
+                            continue
+
+                        # Left behind by a version that filed footprint documents as
+                        # symbols; the merge kept resurrecting them, so the symbol
+                        # library still lists footprints that cannot be placed.
+                        if dropMisfiled and isMisfiledFootprint(oldShape):
+                            warning(f"Dropped '{oldName}' from the symbol library: it is a"
+                                    " footprint that an older version filed as a symbol."
+                                    " Download it again to get it as a footprint.")
+                            continue
+
                         # Freshly downloaded entries replace the old ones with the same name
-                        if oldName and oldName not in shapes:
+                        if oldName not in shapes:
                             shapes[oldName] = oldShape
             except Exception as e:
                 warning(f"Failed to merge existing EasyEDA Std library, overwriting: {e}")
 
         if os.path.exists(zip_filename):
-            mergeOld("symbols.json", symbolShapes, "spiceSymbolName",
-                     lambda doc: doc["schematics"][0]["dataStr"]["shape"])
             mergeOld("footprints.json", footprintShapes, "package", lambda doc: doc["shape"])
+            mergeOld("symbols.json", symbolShapes, "spiceSymbolName",
+                     lambda doc: doc["schematics"][0]["dataStr"]["shape"], dropMisfiled=True)
 
         canvas = "CA~1000~1000~#FFFFFF~yes~#CCCCCC~10~1000~1000~line~1~pixel~5~0~0"
 

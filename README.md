@@ -119,6 +119,11 @@ Symbols and footprints are separate documents on EasyEDA Std. A symbol may carry
 footprint, or none at all; a footprint on its own (no symbol) is also downloadable and lands in
 the footprint library. If a symbol reports no footprint, search for the footprint by name.
 
+Versions before 1.0.11 could file a footprint-only part as a *symbol*, leaving entries like
+`5580_MAX17048_FOOTPRINT` in the symbol library that cannot be placed. The next download into
+that library removes them and says so in the log; download the part again to get it as a
+footprint.
+
 3D models of both sources go to `EASYEDA_MODELS` in the project directory.
 
 If you add the `-std.zip` library by hand instead, select the library type explicitly:

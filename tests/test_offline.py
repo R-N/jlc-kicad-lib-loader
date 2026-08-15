@@ -351,6 +351,56 @@ def test_std_library():
     # and that is fine: KiCad's importer keys footprints on the `package`
     # parameter, and enumerates both entries of a zip holding two `gge1` shapes.
 
+    # A version that could not tell docType 2 from 4 wrapped footprint documents as
+    # symbols. Those entries are verbatim from a library that version produced: no
+    # `name`, and `spiceSymbolName` equal to the package. Two of them, because the
+    # footprint of one was never filed as a footprint at all, so the stale symbol is
+    # the only trace of it and matching against footprints.json would miss it.
+    misfiled = [
+        "LIB~4000~3000~package`ADAFRUIT-MAX17048-GOED`pre`U?`Contributor`liekens.thije`link``"
+        "spiceSymbolName`ADAFRUIT-MAX17048-GOED~~~gge1~1#@$RECT~4000~3000~40~20~3~1~gge2~0~",
+        "LIB~4000~3000~package`5580_MAX17048_FOOTPRINT`pre`U?`Contributor`furai03`link``"
+        "3DModel`5580 MAX17048`spiceSymbolName`5580_MAX17048_FOOTPRINT~~~gge1~1"
+        "#@$RECT~4000~3000~40~20~3~1~gge2~0~",
+    ]
+
+    # A real symbol whose package is named after it, verbatim from the same library:
+    # `package` and `spiceSymbolName` match here too, so only the missing `name`
+    # distinguishes a misfiled footprint. This one must survive.
+    genuine = ("LIB~360~260~name`CH9340`package`CH9340`pre`U?`Manufacturer``Manufacturer Part``"
+               "Supplier``Supplier Part``link``Contributor`skuzmich`spiceSymbolName`CH9340"
+               "~~~gge1~1#@$RECT~360~260~40~20~3~1~gge2~0~")
+
+    with zipfile.ZipFile(zip_path) as zf:
+        symbolDoc = json.loads(zf.read("symbols.json"))
+        footprintDoc = json.loads(zf.read("footprints.json"))
+
+    check(all(cl.isMisfiledFootprint(shape) for shape in misfiled),
+          "the misfiled-footprint signature does not match what the old version wrote")
+    check(not cl.isMisfiledFootprint(genuine),
+          "a symbol sharing its name with its package looks misfiled")
+    check(not any(cl.isMisfiledFootprint(shape)
+                  for shape in symbolDoc["schematics"][0]["dataStr"]["shape"]),
+          "a genuine symbol looks misfiled")
+
+    symbolDoc["schematics"][0]["dataStr"]["shape"].extend(misfiled + [genuine])
+
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("symbols.json", json.dumps(symbolDoc))
+        zf.writestr("footprints.json", json.dumps(footprintDoc))
+
+    loader.session = FakeSession({"fp": FOOTPRINT_DOC})
+    loader.downloadStd(["fp"])
+
+    with zipfile.ZipFile(zip_path) as zf:
+        keptSymbols = json.loads(zf.read("symbols.json"))["schematics"][0]["dataStr"]["shape"]
+        keptFootprints = json.loads(zf.read("footprints.json"))["shape"]
+
+    names = sorted(cl.stdShapeName(s, "spiceSymbolName") for s in keptSymbols)
+    check(names == ["CH9340", "WIDGET"], f"wrong symbols kept: {names}")
+    check(sorted(cl.stdShapeName(f, "package") for f in keptFootprints)
+          == ["LONELY-PKG", "WIDGET-PKG"], "dropping the stale symbols cost a footprint")
+
 
 # --------------------------------------------------------------------------
 # config_manager: library table rows
