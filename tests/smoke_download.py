@@ -46,7 +46,12 @@ def loader():
 
 
 # Pro and Std in one run: they share the model downloader and the lib tables.
-loader().downloadAll([PRO_PART, STD_PART])
+# The summary is what the dialog reports, so it must count what actually landed.
+summary = loader().downloadAll([PRO_PART, STD_PART])
+print("summary:", summary)
+assert not summary["error"], f"download reported an error: {summary['error']}"
+assert summary["symbols"] == 2 and summary["footprints"] == 2, f"miscounted: {summary}"
+assert not summary["failed"], f"parts failed: {summary}"
 
 elibz = os.path.join(target, "EasyEDA_Lib.elibz")
 stdzip = os.path.join(target, "EasyEDA_Lib-std.zip")

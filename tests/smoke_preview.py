@@ -1,14 +1,13 @@
-"""Drive the real dialog and check the preview pane for each kind of part.
+"""Drive the real dialog and check both preview panels for each kind of part.
 
     python3 tests/smoke_preview.py
 
 Needs the network, KiCad's `pcbnew`, and a `wx` with WebView (on Linux,
-`python3-wxgtk-webview4.0`); it exits cleanly when the preview degrades to a
-static text pane. Run it by hand after touching the preview.
+`python3-wxgtk-webview4.0`); it exits cleanly when the panels degrade to static
+text. Run it by hand after touching the preview.
 
-The four rows below are the four ways a preview can be built. It clicks them
-with a simulated mouse rather than calling the handler directly, so the event
-wiring is covered too.
+The four rows below are the four ways a preview can be built. Symbol and footprint
+live in separate panels, so each must end up holding exactly one drawing.
 """
 
 import os
@@ -54,7 +53,7 @@ dialog.SetSize((1200, 800))
 dialog.Show()
 tree = dialog.m_searchResultsTree
 
-if not isinstance(plugin.webView, wx.html2.WebView):
+if not isinstance(plugin.symbolView, wx.html2.WebView):
     print("SKIP: no WebView in this environment")
     sys.exit(0)
 
@@ -80,14 +79,27 @@ class StubSelection:
         return self.item
 
 
+def readPanels():
+    panels = {}
+
+    for name, view in (("symbol", plugin.symbolView), ("footprint", plugin.footprintView)):
+        ok, html = view.RunScript("document.body.innerHTML")
+        assert ok, f"could not read the {name} panel back out of its WebView"
+        panels[name] = html or ""
+
+    return panels
+
+
 def selectRow(code):
     """Put one row in the tree and select it, so the real handler runs on it."""
     tree.DeleteAllItems()
-    item = tree.AppendItem(tree.GetRootItem(), code)
+    item = tree.AppendItem(tree.GetRootItem(), "")
+    # Column 1 is Code/UUID; the handler reads the code from there, not from the tree label.
+    tree.SetItemText(item, 1, code)
     pump(0.4)
 
     global clicked
-    html = ""
+    panels = {"symbol": "", "footprint": ""}
 
     if clicked:
         # A simulated click is the honest path, but it only lands when the window
@@ -103,53 +115,59 @@ def selectRow(code):
         pump(0.2)
         sim.MouseClick(wx.MOUSE_BTN_LEFT)
         pump(4.0)
+        panels = readPanels()
 
-        ok, html = plugin.webView.RunScript("document.body.innerHTML")
-        assert ok, "could not read the preview back out of the WebView"
-
-    if not html:
+    if not any("<svg" in html or "<img" in html or "note" in html for html in panels.values()):
         clicked = False
         tree.Select(item)
         plugin.onSearchItemSelected(StubSelection(item))
-        pump(4.0)
-        ok, html = plugin.webView.RunScript("document.body.innerHTML")
-        assert ok, "could not read the preview back out of the WebView"
+        pump(4.5)
+        panels = readPanels()
 
-    return html or ""
-
-
-def captions(html):
-    return re.findall(r"<figcaption>([^<]+)</figcaption>", html)
+    return panels
 
 
-html = selectRow(PRO_CODED)
-print("pro, coded    -> svg:", html.count("<svg"), captions(html))
-assert html.count("<svg") >= 2, f"expected EasyEDA's own drawings, got {html.count('<svg')}"
-assert captions(html) == ["Symbol", "Footprint"], f"captions: {captions(html)}"
-# The viewer link is a wx hyperlink beside the pane, not part of the HTML.
+def drawings(html):
+    return html.count("<svg") + html.count("<img")
+
+
+def report(label, panels):
+    print(f"{label:14} -> symbol: {drawings(panels['symbol'])} drawing,"
+          f" footprint: {drawings(panels['footprint'])} drawing")
+
+
+panels = selectRow(PRO_CODED)
+report("pro, coded", panels)
+for name, html in panels.items():
+    assert drawings(html) == 1, f"{name} panel holds {drawings(html)} drawings, expected 1"
+    assert "<svg" in html, f"{name} should be EasyEDA's own inline SVG"
+    assert 'class="note"' not in html, f"{name} panel shows a note despite having a drawing"
+
+# The viewer links are wx hyperlinks beside the parameters, not part of the HTML.
 link = dialog.m_searchHyperlink1
 assert "pro.easyeda.com/editor" in link.GetURL(), f"editor link: {link.GetURL()}"
 assert link.GetLabel() == "Open in EasyEDA Pro", f"link label: {link.GetLabel()}"
+assert dialog.m_searchHyperlink2.GetLabel() == "JLCPCB", "JLCPCB link missing for a coded part"
+assert dialog.m_paramsList.GetItemCount() > 3, "parameters list is empty"
 
-html = selectRow(PRO_CODELESS)
-print("pro, codeless -> svg:", html.count("<svg"), captions(html))
-assert html.count("<svg") >= 2, f"expected locally drawn symbol+footprint, got {html.count('<svg')}"
-assert captions(html) == ["Symbol", "Footprint"], f"captions: {captions(html)}"
-assert 'class="note"' not in html, "note shown even though the part was rendered"
+panels = selectRow(PRO_CODELESS)
+report("pro, codeless", panels)
+for name, html in panels.items():
+    assert drawings(html) == 1, f"{name} panel holds {drawings(html)}, expected a local render"
+    assert 'class="note"' not in html, f"{name} panel shows a note despite being rendered"
+assert not dialog.m_searchHyperlink2.IsShown(), "a codeless part has no JLCPCB page"
 
-html = selectRow(PRO_EMPTY)
-note = re.search(r'<p class="note">([^<]+)</p>', html)
-print("pro, no data  -> svg:", html.count("<svg"),
-      "| note:", (note.group(1)[:60] + "…") if note else "(none)")
-assert html.count("<svg") == 0, "drew something for a document with no geometry"
-assert note, "no explanation for the absent drawing"
+panels = selectRow(PRO_EMPTY)
+report("pro, no data", panels)
+for name, html in panels.items():
+    assert drawings(html) == 0, f"{name} panel drew something for an empty document"
+    assert 'class="note"' in html, f"{name} panel is blank with no explanation"
 
-html = selectRow(STD_PART)
-images = re.findall(r'<img src="([^"]+)"', html)
-print("std           -> images:", len(images), captions(html))
-assert len(images) == 2, f"expected symbol+footprint thumbnails, got {images}"
-assert captions(html) == ["Symbol", "Footprint"], f"captions: {captions(html)}"
-assert "onerror=" in html, "thumbnails must hide themselves when EasyEDA has no image"
+panels = selectRow(STD_PART)
+report("std", panels)
+for name, html in panels.items():
+    assert drawings(html) == 1, f"{name} panel holds {drawings(html)} thumbnails, expected 1"
+    assert "<img" in html, f"{name} should be an EasyEDA thumbnail"
 assert "easyeda.com/component/" in link.GetURL(), f"Std viewer link: {link.GetURL()}"
 assert link.GetLabel() == "Open in EasyEDA Std", f"link label: {link.GetLabel()}"
 

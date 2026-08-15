@@ -28,6 +28,21 @@ sys.path.insert(0, ROOT)
 # on purpose. Keep the expected noise out of the report.
 logging.disable(logging.WARNING)
 
+def loaderModule():
+    """`easyeda_lib_loader` imported the way KiCad imports it: as a package.
+
+    Its own imports are relative (`from .component_loader import *`), so a flat
+    import cannot work; a symlink gives the repository a package name.
+    """
+    if "jlcpkg.easyeda_lib_loader" not in sys.modules:
+        pkgroot = tempfile.mkdtemp(prefix="jlcpkgroot")
+        os.symlink(ROOT, os.path.join(pkgroot, "jlcpkg"))
+        sys.path.insert(0, pkgroot)
+
+    from jlcpkg import easyeda_lib_loader
+
+    return easyeda_lib_loader
+
 passed = 0
 skipped = []
 
@@ -290,7 +305,9 @@ def test_std_library():
 
     # docType 2 carries its footprint in packageDetail; docType 4 *is* a
     # footprint. Getting this wrong filed footprints as symbols.
-    models = loader.downloadStd(["sym", "fp"])
+    models, symbolCount, footprintCount = loader.downloadStd(["sym", "fp"])
+    check((symbolCount, footprintCount) == (1, 2),
+          f"counts reported to the caller are wrong: {symbolCount}, {footprintCount}")
     zip_path = os.path.join(target, "Test-std.zip")
 
     with zipfile.ZipFile(zip_path) as zf:
@@ -383,6 +400,112 @@ def test_library_tables():
     check(cm.ConfigManager(kiprjmod).get_library_name() == "Chosen", "library name not persisted")
 
 
+# --------------------------------------------------------------------------
+# easyeda_lib_loader: the grid rows and the download queue
+# --------------------------------------------------------------------------
+
+PRO_DEVICE = {
+    "uuid": "8209ba65d24940569c88b6b832f4ceb3",
+    "product_code": "C6186",
+    "display_title": "AMS1117-3.3_C6186",
+    "footprint": {"display_title": "SOT-223-3_L6.5-W3.4-P2.30-LS7.0-BR"},
+    "creator": {"nickname": "LCSC"},
+    "attributes": {"Manufacturer Part": "AMS1117-3.3", "Supplier Footprint": "SOT-223",
+                   "JLCPCB Part Class": "Basic Part", "Supplier Part": "C6186"},
+}
+
+STD_FOOTPRINT_ENTRY = {
+    "uuid": "446b46a6b72d4f39850e4a16d55d1a00",
+    "title": "MAX17048_BREAKOUT",
+    "owner": {"username": "adafruit"},
+    "dataStr": {"head": {"docType": "4", "c_para": {"package": "MAX17048_BREAKOUT"}}},
+}
+
+
+def test_result_rows():
+    ell = loaderModule()
+
+    row = ell.proRow(PRO_DEVICE, ell.SOURCE_SYSTEM)
+    check(len(row) == len(ell.RESULT_COLUMNS), "row width does not match the columns")
+    check(row[0] == "System", "source not taken from the facet")
+    check(row[1] == "C6186", "code column")
+    check(row[3] == "AMS1117-3.3", "MPN column")
+    # The document title is unreadable; the supplier package is what a person knows.
+    check(row[4] == "SOT-223", f"package column shows {row[4]!r}")
+    check(row[5] == "Basic", f"part class should drop the word Part: {row[5]!r}")
+    check(row[7] == "LCSC", "contributor column")
+
+    # An uncoded device in JLC's own catalogue is still a JLC System part: the facet
+    # decides, not the presence of a code.
+    uncoded = dict(PRO_DEVICE, product_code="", attributes={})
+    check(ell.proRow(uncoded, ell.SOURCE_SYSTEM)[0] == "System", "source overridden by the code")
+    check(ell.proRow(uncoded, ell.SOURCE_SYSTEM)[1] == PRO_DEVICE["uuid"],
+          "a codeless device must fall back to its uuid")
+
+    # A Std standalone footprint has to be distinguishable from a symbol.
+    footprint = ell.stdRow(STD_FOOTPRINT_ENTRY)
+    check(footprint[0] == "Std" and footprint[6] == "Footprint", f"std footprint row: {footprint}")
+    check(footprint[1] == "std:" + STD_FOOTPRINT_ENTRY["uuid"], "std rows need the std: prefix")
+    check(footprint[7] == "adafruit", "contributor from owner.username")
+
+    symbolEntry = json.loads(json.dumps(STD_FOOTPRINT_ENTRY))
+    symbolEntry["dataStr"]["head"]["docType"] = "2"
+    check(ell.stdRow(symbolEntry)[6] == "Symbol", "docType 2 is a symbol")
+
+
+def test_filter_and_sort():
+    ell = loaderModule()
+
+    rows = [ell.proRow(PRO_DEVICE, ell.SOURCE_SYSTEM), ell.stdRow(STD_FOOTPRINT_ENTRY)]
+
+    # Every term must match somewhere in the row, in any column, either case.
+    check(ell.rowMatches(rows[0], ""), "an empty filter must keep everything")
+    check(ell.rowMatches(rows[0], "sot-223"), "package not searched")
+    check(ell.rowMatches(rows[0], "ams1117 basic"), "terms must combine")
+    check(not ell.rowMatches(rows[0], "ams1117 esp32"), "a missing term must exclude the row")
+    check(ell.rowMatches(rows[1], "adafruit"), "contributor not searched")
+    check(not ell.rowMatches(rows[1], "C6186"), "filter leaked across rows")
+
+    # Codes sort numerically, so C90 comes before C1000 instead of after it.
+    codes = ["C1000", "C90", "C6186"]
+    ordered = sorted(codes, key=lambda code: ell.sortKey((None, code), 1))
+    check(ordered == ["C90", "C1000", "C6186"], f"codes sorted as text: {ordered}")
+
+    names = ["beta", "Alpha", "gamma"]
+    ordered = sorted(names, key=lambda name: ell.sortKey((None, None, name), 2))
+    check(ordered == ["Alpha", "beta", "gamma"], f"names not case-insensitive: {ordered}")
+
+
+def test_part_queue():
+    ell = loaderModule()
+
+    queue = ell.PartQueue()
+    row = ell.proRow(PRO_DEVICE, ell.SOURCE_SYSTEM)
+
+    check(queue.addRows([row]) == 1, "row not queued")
+    check(queue.addRows([row]) == 0, "the same part must not queue twice")
+    check(len(queue) == 1 and queue.codes() == ["C6186"], f"queue holds {queue.rows()}")
+
+    # Pasted text is the power-user path; the source is inferred from the code shape.
+    check(queue.addCodes("C2040\n std:4c0dae4e \n\nC6186\n") == 2,
+          "pasted codes: two new, one blank, one duplicate")
+    check(queue.codes() == ["C6186", "C2040", "std:4c0dae4e"], f"order lost: {queue.codes()}")
+    check(dict(zip(queue.codes(), (row[0] for row in queue.rows())))["std:4c0dae4e"] == "Std",
+          "a std: code must be labelled Std")
+
+    queue.remove(["C2040"])
+    check(queue.codes() == ["C6186", "std:4c0dae4e"], "remove took the wrong entry")
+    queue.clear()
+    check(len(queue) == 0 and not queue.codes(), "clear left something behind")
+
+    # What the download path consumes: splitSources must understand every queued code.
+    import component_loader as cl
+    queue.addCodes("C6186\nstd:4c0dae4e\n8209ba65d24940569c88b6b832f4ceb3\n")
+    pro, std = cl.splitSources(queue.codes())
+    check(pro == ["C6186", "8209ba65d24940569c88b6b832f4ceb3"] and std == ["4c0dae4e"],
+          f"queue does not feed the loader cleanly: {pro}, {std}")
+
+
 SECTIONS = [
     ("pro_render, real document", test_real_document, ()),
     ("pro_render, axis and units", test_y_axis_and_units, ()),
@@ -392,6 +515,9 @@ SECTIONS = [
     ("pro_render, contours", test_contour_primitives, ()),
     ("pro_render, empty documents", test_empty_and_broken_documents, ()),
     ("component_loader, Std library", test_std_library, ("requests", "pcbnew")),
+    ("easyeda_lib_loader, result rows", test_result_rows, ("requests", "pcbnew", "wx")),
+    ("easyeda_lib_loader, filter and sort", test_filter_and_sort, ("requests", "pcbnew", "wx")),
+    ("easyeda_lib_loader, part queue", test_part_queue, ("requests", "pcbnew", "wx")),
     ("config_manager, library tables", test_library_tables, ("wx",)),
 ]
 

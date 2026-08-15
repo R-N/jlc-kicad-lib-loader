@@ -21,8 +21,11 @@ STD_PREFIX = "std:"
 STD_SEARCH_URL = "https://easyeda.com/api/components/search"
 STD_COMPONENT_URL = "https://easyeda.com/api/components/{uuid}"
 
-# EasyEDA Pro (pro.easyeda.com) component documents.
+# EasyEDA Pro (pro.easyeda.com) endpoints.
 PRO_COMPONENT_URL = "https://pro.easyeda.com/api/v2/components/{uuid}"
+PRO_DEVICE_URL = "https://pro.easyeda.com/api/devices/{uuid}"
+PRO_SEARCH_URL = "https://pro.easyeda.com/api/v2/devices/search"
+PRO_SEARCH_BY_CODES_URL = "https://pro.easyeda.com/api/v2/devices/searchByCodes"
 
 # EasyEDA Standard uses units of 10 mil; KiCad models are in mm.
 STD_UNIT_TO_MM = 10.0 / 39.37
@@ -85,27 +88,43 @@ class ComponentLoader():
         self.progress = progress
         self.session = session
 
+    # Downloads everything and returns what reached the library, so the caller can show an
+    # outcome instead of making the user read the log:
+    # { symbols, footprints, models, skipped, failed, error }
     def downloadAll(self, components):
         self.progress(0, 100)
 
         proComponents, stdComponents = splitSources(components)
+        summary = {"symbols": 0, "footprints": 0, "models": 0, "skipped": 0, "failed": 0,
+                   "error": None}
 
         try:
             modelTasks = {}
 
             if proComponents:
-                libDeviceFile, fetched_3dmodels = self.downloadSymFp(proComponents)
+                libDeviceFile, fetched_3dmodels, proSymbols, proFootprints = self.downloadSymFp(proComponents)
+                summary["symbols"] += proSymbols
+                summary["footprints"] += proFootprints
                 modelTasks.update(self.collectProModels(libDeviceFile, fetched_3dmodels))
 
             if stdComponents:
-                modelTasks.update(self.downloadStd(stdComponents))
+                stdTasks, stdSymbols, stdFootprints = self.downloadStd(stdComponents)
+                summary["symbols"] += stdSymbols
+                summary["footprints"] += stdFootprints
+                modelTasks.update(stdTasks)
 
             self.downloadModels(modelTasks)
+            summary["models"] = self.statDownloaded + self.statExisting
+            summary["skipped"] = self.statSkipped
+            summary["failed"] = self.statFailed
             self.progress(100, 100)
             self.warnRescanNeeded()
         except Exception as e:
             traceback.print_exc()
             error(f"Failed to download components: {traceback.format_exc()}")
+            summary["error"] = str(e) or e.__class__.__name__
+
+        return summary
 
     def warnRescanNeeded(self):
         # KiCad's EasyEDA importers return a constant 0 from GetLibraryTimestamp(), and
@@ -277,7 +296,7 @@ class ComponentLoader():
         info( "*****************************" )
         info(f"Downloaded {len(fetched_devices)} devices, {written_symbols} symbols, "
              f"{written_footprints} footprints and added to library: {zip_filename}")
-        return libDeviceFile, fetched_3dmodels
+        return libDeviceFile, fetched_3dmodels, written_symbols, written_footprints
 
     # Collect 3D model download tasks for Pro devices: { model uuid: (target file, fit X mm, fit Y mm) }
     def collectProModels(self, libDeviceFile, fetched_3dmodels):
@@ -545,7 +564,7 @@ class ComponentLoader():
         info(f"Downloaded {len(symbolShapes)} symbols and {len(footprintShapes)} footprints "
              f"from EasyEDA Std into library: {zip_filename}")
 
-        return modelTasks
+        return modelTasks, len(symbolShapes), len(footprintShapes)
 
     # Collect 3D model tasks from the "outline3D" SVGNODE of an EasyEDA Std footprint.
     def collectStdModels(self, fpDataStr):
