@@ -765,11 +765,18 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
                     attributes = dict((result.get("dataStr") or {}).get("head", {}).get("c_para") or {})
                     preview_title = result.get("title", "")
                     preview_symbol = imageMarkup(thumbUrl(result, stdUuid))
+                    kicadNames = {"Symbol in KiCad": attributes.get("spiceSymbolName")
+                                  or result.get("title", "")}
 
                     if result.get("packageDetail"):
                         package = result["packageDetail"]
                         attributes["Footprint"] = package.get("title", "")
+                        kicadNames["Footprint in KiCad"] = (
+                            (package.get("dataStr") or {}).get("head", {})
+                            .get("c_para", {}).get("package") or package.get("title", ""))
                         preview_footprint = imageMarkup(thumbUrl(package, package.get("uuid")))
+
+                    attributes = {**kicadNames, **attributes}
                 except Exception as e:
                     traceback.print_exc()
                     warning(f"Failed to load component info for {stdUuid}: {e}")
@@ -801,6 +808,15 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
                     attributes = dict(device['attributes'])
                     preview_title = device.get('display_title') or device.get('title', '')
                     code = attributes.get('Supplier Part', '')
+
+                    # First, because they are what a person needs and cannot guess: KiCad
+                    # names a symbol after its symbol document and a footprint after its
+                    # footprint document, and neither is the part number. One SOT-23
+                    # footprint document is shared by hundreds of parts, so searching
+                    # pcbnew for "AO3401A" finds nothing.
+                    attributes = {"Symbol in KiCad": (device.get("symbol") or {}).get("display_title", ""),
+                                  "Footprint in KiCad": (device.get("footprint") or {}).get("display_title", ""),
+                                  **attributes}
 
                     if attributes.get('Symbol') or attributes.get('Footprint'):
                         # https://pro.easyeda.com/editor#tab=*!{sym_uuid}(device){dev_uuid}|!{fp_uuid}(device){dev_uuid}

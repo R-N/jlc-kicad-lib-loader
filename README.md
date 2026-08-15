@@ -147,6 +147,13 @@ document is empty — placeholders and title-block entries, of which the public 
 fair few — say so instead of showing a blank panel. Use the "Open in EasyEDA Pro"/"Open in
 EasyEDA Std" link for the interactive viewer.
 
+**KiCad does not name parts after the part number.** A symbol is named after its symbol
+document and a footprint after its footprint document, so `AO3401A` (LCSC `C15127`) is placed
+from the symbol `AO3401A` but its footprint is called `SOT-23_L2.9-W1.3-P1.90-LS2.4-BR` —
+searching the footprint chooser for `AO3401A` finds nothing, because that one SOT-23 document
+is shared by hundreds of parts. The first two rows of the preview's parameter list, **Symbol in
+KiCad** and **Footprint in KiCad**, are exactly the names to search for.
+
 ## Downloading
 
 Parts go into a queue first: double-click a result, or select several and press **Add selected**.

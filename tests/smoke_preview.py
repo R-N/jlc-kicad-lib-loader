@@ -96,7 +96,20 @@ def selectRow(code):
     item = tree.AppendItem(tree.GetRootItem(), "")
     # Column 1 is Code/UUID; the handler reads the code from there, not from the tree label.
     tree.SetItemText(item, 1, code)
-    pump(0.4)
+
+    # Wipe what the last part left behind. Otherwise a simulated click that misses
+    # leaves the previous drawings and links in place, and every check below passes
+    # against stale content instead of noticing the handler never ran.
+    for view in (plugin.symbolView, plugin.footprintView):
+        view.SetPage("<html><body></body></html>", "")
+
+    dialog.m_paramsList.DeleteAllItems()
+
+    for link in (dialog.m_searchHyperlink1, dialog.m_searchHyperlink2, dialog.m_searchHyperlink3):
+        link.SetLabelText("")
+        link.Hide()
+
+    pump(0.6)
 
     global clicked
     panels = {"symbol": "", "footprint": ""}
@@ -149,6 +162,17 @@ assert "pro.easyeda.com/editor" in link.GetURL(), f"editor link: {link.GetURL()}
 assert link.GetLabel() == "Open in EasyEDA Pro", f"link label: {link.GetLabel()}"
 assert dialog.m_searchHyperlink2.GetLabel() == "JLCPCB", "JLCPCB link missing for a coded part"
 assert dialog.m_paramsList.GetItemCount() > 3, "parameters list is empty"
+
+# KiCad names a symbol after its symbol document and a footprint after its footprint
+# document, so neither is the part number this row was selected by: searching pcbnew
+# for AMS1117 finds SOT_223. Those two names lead the parameter list because nothing
+# else in the UI tells the user what to look for.
+params = [(dialog.m_paramsList.GetItemText(row, 0), dialog.m_paramsList.GetItemText(row, 1))
+          for row in range(dialog.m_paramsList.GetItemCount())]
+assert [key for key, _ in params[:2]] == ["Symbol in KiCad", "Footprint in KiCad"], \
+    f"the KiCad names are not the first two parameters: {params[:2]}"
+assert dict(params)["Symbol in KiCad"] == "AMS1117", f"symbol name: {params[0]}"
+assert dict(params)["Footprint in KiCad"] == "SOT_223", f"footprint name: {params[1]}"
 
 panels = selectRow(PRO_CODELESS)
 report("pro, codeless", panels)
