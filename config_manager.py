@@ -1,4 +1,5 @@
 import os
+import re
 import configparser
 import wx
 from logging import info, warning, debug, error
@@ -101,6 +102,65 @@ class LibraryTableManager:
             warning(f"Failed to read {lib_type} library table: {e}")
             return False
     
+    @staticmethod
+    def global_table_path(lib_type):
+        """KiCad's global library table for this type, or None if not locatable"""
+        try:
+            import pcbnew
+            settings_dir = pcbnew.SETTINGS_MANAGER.GetUserSettingsPath()
+        except Exception as e:
+            debug(f"Cannot locate KiCad settings directory: {e}")
+            return None
+
+        table = "sym-lib-table" if lib_type == "symbol" else "fp-lib-table"
+        return os.path.join(settings_dir, table)
+
+    def find_global_conflict(self, lib_name, source, lib_type):
+        """URI of a global-table row that steals our nickname, else None
+
+        KiCad keeps one nickname namespace per table type, so a global row named
+        like ours serves a different file under the name this project expects.
+        That silently hides the project library from the chooser, which is
+        impossible to diagnose from the plugin's own log.
+        """
+        table_path = self.global_table_path(lib_type)
+
+        if not table_path or not os.path.exists(table_path):
+            return None
+
+        wanted_name = self.entry_name(lib_name, source)
+        wanted_file = os.path.basename(self.entry_uri(lib_name, source))
+
+        try:
+            with open(table_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+        except Exception as e:
+            debug(f"Failed to read global {lib_type} table: {e}")
+            return None
+
+        for name, uri in re.findall(r'\(name\s+"([^"]*)"\)\s*\(type\s+"[^"]*"\)\s*\(uri\s+"([^"]*)"\)',
+                                    content):
+            if name == wanted_name and os.path.basename(uri) != wanted_file:
+                return uri
+
+        return None
+
+    def warn_global_conflicts(self, lib_name, sources):
+        """Log every global row shadowing this project's libraries"""
+        for source in sources:
+            for lib_type in ("symbol", "footprint"):
+                uri = self.find_global_conflict(lib_name, source, lib_type)
+
+                if not uri:
+                    continue
+
+                name = self.entry_name(lib_name, source)
+                warning(f"A global {lib_type} library is also named '{name}' but points at "
+                        f"{uri}. KiCad loads one library per nickname, so this hides this "
+                        f"project's {os.path.basename(self.entry_uri(lib_name, source))}. "
+                        f"Remove it in Preferences > Manage {lib_type.capitalize()} Libraries "
+                        f"> Global tab.")
+
     def add_library_to_table(self, lib_name, lib_path, lib_type="symbol", source="pro"):
         """Add a library to the library table
         
@@ -176,6 +236,10 @@ class LibraryTableManager:
         Returns:
             True if libraries were added or already exist, False if user cancelled
         """
+        # A shadowing global row breaks the library no matter what the project
+        # table says, so report it even when nothing needs adding.
+        self.warn_global_conflicts(lib_name, sources)
+
         # (source, table type) pairs that still need an entry
         missing = [(source, lib_type)
                    for source in sources

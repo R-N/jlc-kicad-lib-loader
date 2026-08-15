@@ -493,6 +493,47 @@ def test_library_tables():
     config.set_library_name("Chosen")
     check(cm.ConfigManager(kiprjmod).get_library_name() == "Chosen", "library name not persisted")
 
+    # A global row that steals the project nickname hides the project library
+    # from KiCad entirely, so it must be reported. Global tables are written by
+    # KiCad itself and use spaces between the fields, project ones do not.
+    global_dir = tempfile.mkdtemp(prefix="jlcglobal")
+    tables.global_table_path = lambda kind, _dir=global_dir: os.path.join(
+        _dir, "sym-lib-table" if kind == "symbol" else "fp-lib-table")
+
+    check(tables.find_global_conflict("Lib", "pro", "footprint") is None,
+          "conflict reported with no global table at all")
+
+    # Lib_Std is written first on purpose: a matcher that treats the nickname as
+    # a prefix would return this row for the plain "Lib" query.
+    with open(os.path.join(global_dir, "fp-lib-table"), "w") as f:
+        f.write('(fp_lib_table\n  (version 7)\n'
+                '  (lib (name "Other") (type "KiCad") (uri "/x/Other.pretty") (options "") (descr ""))\n'
+                '  (lib (name "Lib_Std") (type "EasyEDA / JLCEDA Std") (uri "/x/Elsewhere-std.zip") (options "") (descr ""))\n'
+                '  (lib (name "Lib") (type "EasyEDA / JLCEDA Std") (uri "/x/Lib-std.zip") (options "") (descr ""))\n'
+                ')\n')
+
+    conflict = tables.find_global_conflict("Lib", "pro", "footprint")
+    check(conflict == "/x/Lib-std.zip", f"shadowing global row not found: {conflict}")
+    check(tables.find_global_conflict("Lib", "pro", "symbol") is None,
+          "a footprint-table row must not be reported against the symbol table")
+
+    # "Lib" and "Lib_Std" are different libraries: neither nickname may be
+    # matched against the other, in either direction.
+    std_conflict = tables.find_global_conflict("Lib", "std", "footprint")
+    check(std_conflict == "/x/Elsewhere-std.zip",
+          f"the Lib_Std row must match the Std nickname, got {std_conflict}")
+    check("Lib-std.zip" not in (std_conflict or ""),
+          "the 'Lib' row was reported for the 'Lib_Std' nickname")
+
+    # Same nickname pointing at the very file we would write is harmless: that
+    # is a user who registered the library globally instead of per project.
+    with open(os.path.join(global_dir, "fp-lib-table"), "w") as f:
+        f.write('(fp_lib_table\n'
+                '  (lib (name "Lib") (type "EasyEDA / JLCEDA Pro") (uri "/other/place/Lib.elibz") (options "") (descr ""))\n'
+                ')\n')
+    check(tables.find_global_conflict("Lib", "pro", "footprint") is None,
+          "a global row pointing at the same file name must not be flagged")
+
 
 # --------------------------------------------------------------------------
 # easyeda_lib_loader: the grid rows and the download queue
