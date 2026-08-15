@@ -4,6 +4,7 @@ from typing import Optional
 
 import os
 import math
+import re
 import traceback
 import logging
 
@@ -62,6 +63,29 @@ def thumbUrl(result, uuid):
         return "https:" + thumb if thumb.startswith("//") else thumb
 
     return f"https://image.easyeda.com/components/{uuid}.png" if uuid else None
+
+def imageMarkup(url):
+    """<img> that removes itself when the source has no rendering."""
+    return (f'<img src="{url}" onerror="this.parentNode.style.display=\'none\'"/>'
+            if url else "")
+
+def productSvgs(code):
+    """Symbol and footprint drawings of an LCSC part, as inline SVG markup.
+
+    Pro documents have no thumbnail service; the drawings come from the same
+    endpoint the JLCPCB part preview page uses, keyed by LCSC code.
+    Returns (symbol, footprint), either of which may be empty.
+    """
+    if not re.fullmatch(r"C\d+", code or ""):
+        return "", ""
+
+    resp = session.get(f"https://easyeda.com/api/products/{code}/svgs")
+    resp.raise_for_status()
+
+    # docType 2 = symbol, 4 = footprint
+    drawings = {str(doc.get("docType")): doc.get("svg", "") for doc in resp.json().get("result") or []}
+
+    return drawings.get("2", ""), drawings.get("4", "")
 
 wx_html2_available = True
 try: 
@@ -425,8 +449,8 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
             itemCode = dlg.m_searchResultsTree.GetItemText(event.GetItem())
             attributes = {}
             preview_title = ""
-            preview_image = ""
-            preview_fp_image = ""
+            preview_symbol = ""
+            preview_footprint = ""
 
             if itemCode.startswith(STD_PREFIX):
                 stdUuid = itemCode[len(STD_PREFIX):]
@@ -439,12 +463,12 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
 
                     attributes = dict((result.get("dataStr") or {}).get("head", {}).get("c_para") or {})
                     preview_title = result.get("title", "")
-                    preview_image = thumbUrl(result, stdUuid) or ""
+                    preview_symbol = imageMarkup(thumbUrl(result, stdUuid))
 
                     if result.get("packageDetail"):
                         package = result["packageDetail"]
                         attributes["Footprint"] = package.get("title", "")
-                        preview_fp_image = thumbUrl(package, package.get("uuid")) or ""
+                        preview_footprint = imageMarkup(thumbUrl(package, package.get("uuid")))
                 except Exception as e:
                     traceback.print_exc()
                     warning(f"Failed to load component info for {stdUuid}: {e}")
@@ -476,6 +500,7 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
                     debug("device info: " + json.dumps(dev_info.json(), indent=4))
                     device = dev_info.json()["result"]
                     attributes = device['attributes']
+                    preview_title = device.get('display_title') or device.get('title', '')
 
                     if attributes.get('Symbol') or attributes.get('Footprint'):
                         # https://pro.easyeda.com/editor#tab=*!{sym_uuid}(device){dev_uuid}|!{fp_uuid}(device){dev_uuid}
@@ -488,8 +513,12 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
                             tabList.append(f"!{attributes['Footprint']}(device){itemCode}")
 
                         easyedaLink = f"https://pro.easyeda.com/editor#tab=*{'|'.join(tabList)}"
+
+                    # Last: the drawings are a bonus, the link above must survive their failure
+                    preview_symbol, preview_footprint = productSvgs(attributes.get('Supplier Part', ''))
                 except Exception as e:
-                    pass
+                    traceback.print_exc()
+                    warning(f"Failed to load device info for {itemCode}: {e}")
 
                 if easyedaLink:
                     dlg.m_searchHyperlink1.SetLabelText( f"Open in EasyEDA Pro" )
@@ -538,6 +567,11 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
                             margin: 0 12px 4px 0;
                             text-align: center;
                         }
+                        figure img, figure svg {
+                            max-width: 220px;
+                            max-height: 220px;
+                            height: auto;
+                        }
                         figcaption {
                             color: #666;
                             font-size: 90%;
@@ -545,13 +579,10 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
                     """
                     heading = preview_title or f"Device UUID: {itemCode}"
 
-                    def figure( label, url ):
-                        # Hide the figure if EasyEDA has no rendering for that document
-                        return (f'<figure><img src="{url}" style="max-width:220px; max-height:220px;"'
-                                f' onerror="this.parentNode.style.display=\'none\'"/>'
-                                f'<figcaption>{label}</figcaption></figure>') if url else ""
+                    def figure( label, drawing ):
+                        return f'<figure>{drawing}<figcaption>{label}</figcaption></figure>' if drawing else ""
 
-                    image_html = figure("Symbol", preview_image) + figure("Footprint", preview_fp_image)
+                    image_html = figure("Symbol", preview_symbol) + figure("Footprint", preview_footprint)
 
                     html_content = f"""
                     <html>

@@ -118,14 +118,15 @@ If you add the `-std.zip` library by hand instead, select the library type expli
 "EasyEDA (JLCEDA) Std" for symbols and "EasyEDA / JLCEDA Std" for footprints — KiCad's automatic
 file-type guess does not recognize a `.zip` as an EasyEDA Std library.
 
-## Searching EasyEDA Std
+## Searching and previewing
 
-Search by keyword or paste a UUID directly to look up a single part. Results list the
-contributor of each user-contributed library, so you can judge a part before importing it.
+Search by keyword, or paste a UUID to look up a single EasyEDA Std part directly. Results list
+the contributor of each user-contributed library, so you can judge a part before importing it.
 
 Selecting a result previews its symbol and footprint drawings side by side, plus the part's
-parameters. These are the static renderings EasyEDA publishes; use the "Open in EasyEDA Std"
-link for the interactive viewer. A drawing EasyEDA has not rendered is simply omitted.
+parameters. Drawings come from EasyEDA's own renderings, so a part EasyEDA has not rendered
+simply shows no drawing; use the "Open in EasyEDA Pro"/"Open in EasyEDA Std" link for the
+interactive viewer.
 
 # Library setup
 
