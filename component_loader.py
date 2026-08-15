@@ -99,9 +99,22 @@ class ComponentLoader():
 
             self.downloadModels(modelTasks)
             self.progress(100, 100)
+            self.invalidateFootprintCache()
         except Exception as e:
             traceback.print_exc()
             error(f"Failed to download components: {traceback.format_exc()}")
+
+    def invalidateFootprintCache(self):
+        # KiCad's footprint chooser searches an fp-info-cache that is only rebuilt on
+        # startup/library rescan, so footprints downloaded into an already-open project
+        # do not appear until the cache is gone. Drop it; KiCad regenerates it on demand.
+        cache = os.path.join(self.kiprjmod, "fp-info-cache")
+        if os.path.exists(cache):
+            try:
+                os.remove(cache)
+                info("Removed stale footprint cache; KiCad will rebuild it on next use.")
+            except OSError as e:
+                warning(f"Could not remove footprint cache {cache}: {e}")
 
     def downloadSymFp(self, components):
         info(f"Fetching info...")

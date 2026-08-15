@@ -35,6 +35,8 @@ Detail-fetch failures are logged with `warning(...)` so the pane can never go bl
 
 **Library tables** (`config_manager.py`): `LibraryTableManager.LIB_ENTRY_TYPES` maps `(source, table)` to the KiCad plugin type — Pro entries are `EasyEDA (JLCEDA) Pro` / `EasyEDA / JLCEDA Pro` on `<name>.elibz`, Std entries are `EasyEDA (JLCEDA) Std` / `EasyEDA / JLCEDA Std` on `<name>-std.zip` under the separate library name `<name>_Std`. Rows are inserted into `sym-lib-table`/`fp-lib-table` (created when absent) after a YES/NO `wx.MessageDialog`; `prompt_add_library(..., sources)` only prompts for the sources actually being downloaded.
 
+After a successful `downloadAll`, `invalidateFootprintCache` deletes `<KIPRJMOD>/fp-info-cache`. KiCad's footprint chooser searches that cache and only rebuilds it on startup or rescan, so footprints downloaded into an already-open project would otherwise not appear in the chooser's search box until pcbnew restarts. The cache is regenerated on demand, so dropping it is cheap and safe.
+
 ## Key Directories
 
 - repo root — all plugin source; flat by design, shipped as-is.
