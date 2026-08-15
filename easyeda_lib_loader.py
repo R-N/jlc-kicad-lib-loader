@@ -87,6 +87,27 @@ def productSvgs(code):
 
     return drawings.get("2", ""), drawings.get("4", "")
 
+def proDrawings(symbolUuid, footprintUuid):
+    """Symbol and footprint drawings rendered from the Pro documents themselves.
+
+    The fallback for parts EasyEDA never rendered, which is every JLC Public
+    part drawn from scratch instead of imported from LCSC.
+    Returns (symbol, footprint), either of which may be empty.
+    """
+    drawings = []
+
+    for uuid, render in ((symbolUuid, pro_render.symbolSvg),
+                         (footprintUuid, pro_render.footprintSvg)):
+        try:
+            drawings.append(render(fetchDataStr(session, uuid)) if uuid else "")
+        except Exception as e:
+            # A missing pycryptodome or an unreadable document costs the drawing,
+            # nothing else.
+            warning(f"Could not fetch Pro document {uuid}: {e}")
+            drawings.append("")
+
+    return drawings[0], drawings[1]
+
 wx_html2_available = True
 try: 
     import wx.html2
@@ -100,6 +121,7 @@ from io import StringIO
 import wx.dataview
 
 from .component_loader import *
+from . import pro_render
 from .easyeda_lib_loader_dialog import EasyEdaLibLoaderDialog
 from .config_manager import ConfigManager, LibraryTableManager
 
@@ -516,6 +538,12 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
 
                     # Last: the drawings are a bonus, the link above must survive their failure
                     preview_symbol, preview_footprint = productSvgs(attributes.get('Supplier Part', ''))
+
+                    if not preview_symbol and not preview_footprint:
+                        # EasyEDA only renders parts with an LCSC code, so draw the
+                        # documents ourselves for the ones it never rendered.
+                        preview_symbol, preview_footprint = proDrawings(
+                            attributes.get('Symbol'), attributes.get('Footprint'))
                 except Exception as e:
                     traceback.print_exc()
                     warning(f"Failed to load device info for {itemCode}: {e}")
@@ -589,12 +617,13 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
                     image_html = figure("Symbol", preview_symbol) + figure("Footprint", preview_footprint)
 
                     if not image_html:
-                        # Pro devices drawn from scratch have no LCSC code, and EasyEDA
-                        # publishes no rendering of their documents. Say so, rather than
-                        # leaving a blank space that looks like a failure.
-                        image_html = ('<p class="note">No drawing published for this part.'
-                                      ' EasyEDA only renders parts that carry an LCSC part number;'
-                                      ' open it in the editor, or import it and view it in KiCad.</p>')
+                        # Reached only when EasyEDA published no rendering and the
+                        # document itself holds no geometry to draw, which happens
+                        # for empty or placeholder library entries. Say so, rather
+                        # than leaving a blank space that looks like a failure.
+                        image_html = ('<p class="note">No drawing available for this part.'
+                                      ' Its EasyEDA document contains no symbol or footprint'
+                                      ' geometry; open it in the editor to check.</p>')
 
                     html_content = f"""
                     <html>

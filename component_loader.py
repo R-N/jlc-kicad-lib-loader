@@ -21,6 +21,9 @@ STD_PREFIX = "std:"
 STD_SEARCH_URL = "https://easyeda.com/api/components/search"
 STD_COMPONENT_URL = "https://easyeda.com/api/components/{uuid}"
 
+# EasyEDA Pro (pro.easyeda.com) component documents.
+PRO_COMPONENT_URL = "https://pro.easyeda.com/api/v2/components/{uuid}"
+
 # EasyEDA Standard uses units of 10 mil; KiCad models are in mm.
 STD_UNIT_TO_MM = 10.0 / 39.37
 
@@ -610,38 +613,51 @@ class ComponentLoader():
 
         return zip_filename
 
-    # Extract dataStr from component data. If dataStr is not available, try to decrypt and decompress the data from dataStrId URL.
     def extractDataStr(self, component_data):
-        if not component_data:
-            return None
-            
-        # Try direct dataStr first
-        dataStr = component_data.get("dataStr")
-        if dataStr:
-            return dataStr
-            
-        # Try dataStrId if dataStr not available
-        dataStrId = component_data.get("dataStrId")
-        if dataStrId:
-            try:
-                keyHex = component_data.get("key")
-                ivHex = component_data.get("iv")
+        return extractDataStr(self.session, component_data)
 
-                debug("dataStrId key: " + keyHex)
-                debug("dataStrId iv: " + ivHex)
-                
-                dataStrResp = self.session.get(dataStrId)
-                dataStrResp.raise_for_status()
-
-                debug("dataStrId encrypted content: " + dataStrResp.content.hex())
-                
-                from . import decryptor
-                decryptedStr = decryptor.decryptDataStrIdData(dataStrResp.content, keyHex, ivHex)
-
-                debug("dataStrId decrypted content: " + decryptedStr)
-
-                return decryptedStr
-            except Exception as e:
-                info(f"Failed to fetch/decrypt dataStrId: {e}")
-                
+# Extract dataStr from component data. If dataStr is not available, try to decrypt and decompress the data from dataStrId URL.
+def extractDataStr(session, component_data):
+    if not component_data:
         return None
+
+    # Try direct dataStr first
+    dataStr = component_data.get("dataStr")
+    if dataStr:
+        return dataStr
+
+    # Try dataStrId if dataStr not available
+    dataStrId = component_data.get("dataStrId")
+    if dataStrId:
+        try:
+            keyHex = component_data.get("key")
+            ivHex = component_data.get("iv")
+
+            debug("dataStrId key: " + keyHex)
+            debug("dataStrId iv: " + ivHex)
+
+            dataStrResp = session.get(dataStrId)
+            dataStrResp.raise_for_status()
+
+            debug("dataStrId encrypted content: " + dataStrResp.content.hex())
+
+            from . import decryptor
+            decryptedStr = decryptor.decryptDataStrIdData(dataStrResp.content, keyHex, ivHex)
+
+            debug("dataStrId decrypted content: " + decryptedStr)
+
+            return decryptedStr
+        except Exception as e:
+            info(f"Failed to fetch/decrypt dataStrId: {e}")
+
+    return None
+
+# Fetch a Pro component document and return its dataStr, decrypting when needed.
+def fetchDataStr(session, uuid):
+    if not uuid:
+        return None
+
+    resp = session.get(PRO_COMPONENT_URL.format(uuid=getUuidFirstPart(uuid)))
+    resp.raise_for_status()
+
+    return extractDataStr(session, resp.json().get("result"))

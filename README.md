@@ -128,9 +128,12 @@ Search by keyword, or paste a UUID to look up a single EasyEDA Std part directly
 the contributor of each user-contributed library, so you can judge a part before importing it.
 
 Selecting a result previews its symbol and footprint drawings side by side, plus the part's
-parameters. Drawings come from EasyEDA's own renderings, so a part EasyEDA has not rendered
-simply shows no drawing; use the "Open in EasyEDA Pro"/"Open in EasyEDA Std" link for the
-interactive viewer.
+parameters. Drawings come from EasyEDA's own renderings where they exist. EasyEDA only renders
+parts that carry an LCSC part number, so for JLC Public parts drawn from scratch the plugin
+draws the symbol and footprint itself from the part's own document. Parts whose EasyEDA document
+is empty — placeholders and title-block entries, of which the public library holds a fair few —
+say so instead of showing a blank pane. Use the "Open in EasyEDA Pro"/"Open in EasyEDA Std" link
+for the interactive viewer.
 
 # Library setup
 

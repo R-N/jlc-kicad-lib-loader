@@ -14,6 +14,7 @@ __init__.py                       EasyEDALibLoaderPlugin().register()   <- KiCad
     easyeda_lib_loader_dialog.py  GENERATED wxFormBuilder dialog (do not edit)
     component_loader.py           ComponentLoader: Pro -> .elibz, Std -> -std.zip, + STEP models
       decryptor.py                AES-GCM + gzip for encrypted dataStrId payloads
+      pro_render.py               Pro dataStr -> SVG, for the preview pane only
     config_manager.py             ConfigManager (.ini) + LibraryTableManager (lib tables)
 ```
 
@@ -22,10 +23,12 @@ __init__.py                       EasyEDALibLoaderPlugin().register()   <- KiCad
 **Preview flow**: `onSearchItemSelected` fetches the detail document for the selected row and renders it into `self.webView` (a `wx.html2.WebView`, absent on Flatpak/webkit-less Linux — the pane degrades to a `wx.StaticText`). Three branches, all producing the same page: two `<figure>`s side by side, **Symbol** and **Footprint**, above a table of the part's parameters.
 
 - **Std** (`std:` rows) — `GET /api/components/{uuid}`; figures are `<img>`s built by `thumbUrl`, which falls back to `https://image.easyeda.com/components/<uuid>.png` when the JSON `thumb` field is null (always the case for `packageDetail`). `imageMarkup` gives each `<img>` an `onerror` that hides its figure, so an unrendered document drops out without needing a probe request.
-- **Pro device uuid rows** (JLC Public) — `GET https://pro.easyeda.com/api/devices/{uuid}`; Pro documents have **no thumbnail service** (`image.easyeda.com` 403s on their uuids), so `productSvgs` pulls inline SVG from `https://easyeda.com/api/products/<Cxxxx>/svgs` — the endpoint behind JLCPCB's own part preview — keyed by the `Supplier Part` attribute, taking `docType` 2 as the symbol and 4 as the footprint. An unknown or unrendered code answers `200` with `success:false` and no `result`, which yields empty markup and simply omits the figures. This call goes **last** in the `try` so a drawing failure cannot cost the "Open in EasyEDA Pro" link.
+- **Pro device uuid rows** (JLC Public) — `GET https://pro.easyeda.com/api/devices/{uuid}`; Pro documents have **no thumbnail service** (`image.easyeda.com` 403s on their uuids), so `productSvgs` pulls inline SVG from `https://easyeda.com/api/products/<Cxxxx>/svgs` — the endpoint behind JLCPCB's own part preview — keyed by the `Supplier Part` attribute, taking `docType` 2 as the symbol and 4 as the footprint. An unknown or unrendered code answers `200` with `success:false` and no `result`, which yields empty markup. EasyEDA only renders parts carrying an LCSC code, so when that yields nothing `proDrawings` falls back to `pro_render`, which draws the documents locally (see below). Both calls go **last** in the `try` so a drawing failure cannot cost the "Open in EasyEDA Pro" link.
 - **LCSC `C…` code rows** (JLC System) — the webview loads JLCPCB's `lcsvg/svg.html?code=…` page directly; it renders both drawings itself, so nothing is built locally.
 
 Detail-fetch failures are logged with `warning(...)` so the pane can never go blank without a trace.
+
+**Local Pro rendering** (`pro_render.py`): `symbolSvg`/`footprintSvg` turn a Pro document's `dataStr` into inline SVG, reached through `component_loader.fetchDataStr` (`GET /api/v2/components/{uuid}` plus the `dataStrId` decryption fallback). Every field index and unit convention is copied from KiCad's own importers — `eeschema/sch_io/easyedapro` and `pcbnew/pcb_io/easyedapro` — so the preview agrees with what importing the part produces: **Y grows upwards** (both KiCad parsers negate it), symbol coordinates are **10-mil units**, footprint coordinates are **mils**, `FONTSTYLE` index 5 is the font size scaled by `0.62`, and pin `rotation` points from the connection tip back towards the body. `contour` mirrors `ParseContour` (`L`/`ARC`/`CARC`/`C`/`CIRCLE`/`R` tokens). Footprint drawing is restricted to `ARTWORK_LAYERS` (copper, silkscreen, outline, multi) using the palette in the document's own `LAYER` lines; mask, paste, fab, component-shape/marking, pin-soldering/floating and keepout layers are documentation that EasyEDA does not draw either, and rendering them buries the pads under opaque blocks. Pads are drawn last so silkscreen cannot cover them. A document with no geometry (empty `dataStr`, or a title-block `TABLE`/placeholder entry — common in the user library) renders to `""`, and the preview then shows the `.note` paragraph instead. **This renderer is preview-only; the download path still ships documents verbatim and converts no geometry.**
 
 **Download flow**: `onDownload` (~139-187) reads part codes/UUIDs from `m_textCtrlParts`, resolves the target path (`lib_field` if absolute, else `$KIPRJMOD/<lib_field>`), persists the library name, prompts to register library tables, then a daemon `downloadThread` runs `ComponentLoader(...).downloadAll`:
 
@@ -84,6 +87,7 @@ Manual testing: copy the root `.py` files into the KiCad 3rd-party plugin dir (o
 | `component_loader.py` | `ComponentLoader.downloadAll` / `downloadSymFp` / `downloadModels` |
 | `config_manager.py` | `ConfigManager`, `LibraryTableManager` |
 | `decryptor.py` | `decryptDataStrIdData` (AES-GCM, tag = last 16 bytes, then gzip) |
+| `pro_render.py` | `symbolSvg` / `footprintSvg`: Pro documents -> inline SVG for the preview |
 | `easyeda_lib_loader_dialog.py` / `.fbp` | generated dialog / its wxFormBuilder source |
 | `create_pcm_archive.sh` | build; `VERSION` is **hardcoded** (currently `1.0.11`) |
 | `pcm/metadata.template.json` | PCM v1 metadata; `kicad_version` min `8.0.7` |
