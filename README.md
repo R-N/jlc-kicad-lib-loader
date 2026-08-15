@@ -119,6 +119,12 @@ Symbols and footprints are separate documents on EasyEDA Std. A symbol may carry
 footprint, or none at all; a footprint on its own (no symbol) is also downloadable and lands in
 the footprint library. If a symbol reports no footprint, search for the footprint by name.
 
+If a part's document could not be read (before 1.0.11, encrypted documents failed to decrypt
+when `pycryptodome` was missing), its name was still indexed in the library. KiCad reads a library
+by loading every entry in that index, so one entry without a document stopped the scan and **the
+whole library went missing from the chooser**. Downloading anything now prunes those entries — the
+log names each one — and any part dropped this way can simply be downloaded again.
+
 Versions before 1.0.11 could file a footprint-only part as a *symbol*, leaving entries like
 `5580_MAX17048_FOOTPRINT` in the symbol library that cannot be placed. The next download into
 that library removes them and says so in the log; download the part again to get it as a

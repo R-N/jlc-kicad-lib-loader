@@ -403,6 +403,50 @@ def test_std_library():
 
 
 # --------------------------------------------------------------------------
+# component_loader: the .elibz index must describe what the zip contains
+# --------------------------------------------------------------------------
+
+def test_library_index():
+    import component_loader as cl
+
+    # Shaped like a real library that lost documents: KiCad enumerates from device.json
+    # and loads by name, so an indexed entry with no document appears in the chooser and
+    # fails to load, which stops the scan and hides every other footprint in the library.
+    lib = {
+        "devices": {
+            "dev-ok": {"display_title": "AO3401A_C15127",
+                       "attributes": {"Symbol": "sym-ok", "Footprint": "fp-ok"}},
+            "dev-broken": {"display_title": "J5019 MINI MODULE",
+                           "attributes": {"Symbol": "sym-gone", "Footprint": "fp-gone"}},
+        },
+        "symbols": {"sym-ok": {"display_title": "AO3401A"}, "sym-gone": {"display_title": "J5019"}},
+        "footprints": {"fp-ok": {"display_title": "SOT-23_L2.9-W1.3-P1.90-LS2.4-BR"},
+                       "fp-gone": {"display_title": "J5019 MINI MODULE"}},
+    }
+
+    dropped = cl.pruneOrphans(lib, {"sym-ok": "doc"}, {"fp-ok": "doc"})
+    check(dropped == 3, f"expected the orphan symbol, footprint and device to go: {dropped}")
+    check(list(lib["footprints"]) == ["fp-ok"], f"orphan footprint kept: {list(lib['footprints'])}")
+    check(list(lib["symbols"]) == ["sym-ok"], f"orphan symbol kept: {list(lib['symbols'])}")
+    check(list(lib["devices"]) == ["dev-ok"], f"unusable device kept: {list(lib['devices'])}")
+    check(cl.pruneOrphans(lib, {"sym-ok": "doc"}, {"fp-ok": "doc"}) == 0,
+          "pruning a consistent library must change nothing")
+
+    # Three user-contributed documents all titled J5019: KiCad reaches one name once, so
+    # two of them were invisible.
+    entries = {"b-uuid": {"display_title": "J5019"}, "a-uuid": {"display_title": "J5019"},
+               "c-uuid": {"display_title": "J5019 EDIT"}}
+    cl.uniquifyTitles(entries)
+    titles = sorted(cl.entryTitle(e) for e in entries.values())
+    check(len(set(titles)) == 3, f"titles still collide: {titles}")
+    # The uuid that sorts first keeps the plain name, so a board already referencing
+    # "J5019" keeps resolving to the same document across downloads.
+    check(cl.entryTitle(entries["a-uuid"]) == "J5019", f"kept the wrong one: {titles}")
+    check(cl.entryTitle(entries["b-uuid"]) == "J5019 (b-uu)", f"renamed to {titles}")
+    check(cl.entryTitle(entries["c-uuid"]) == "J5019 EDIT", "renamed an entry that was unique")
+
+
+# --------------------------------------------------------------------------
 # config_manager: library table rows
 # --------------------------------------------------------------------------
 
@@ -568,6 +612,7 @@ SECTIONS = [
     ("easyeda_lib_loader, result rows", test_result_rows, ("requests", "pcbnew", "wx")),
     ("easyeda_lib_loader, filter and sort", test_filter_and_sort, ("requests", "pcbnew", "wx")),
     ("easyeda_lib_loader, part queue", test_part_queue, ("requests", "pcbnew", "wx")),
+    ("component_loader, library index", test_library_index, ("requests", "pcbnew")),
     ("config_manager, library tables", test_library_tables, ("wx",)),
 ]
 

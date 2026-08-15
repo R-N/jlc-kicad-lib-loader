@@ -95,6 +95,59 @@ def isMisfiledFootprint(shape):
 
     return bool(package) and not params.get("name") and params.get("spiceSymbolName") == package
 
+
+def entryTitle(entry):
+    return entry.get("display_title") or entry.get("title") or ""
+
+
+# KiCad enumerates an .elibz from device.json and then loads each entry by name, so an
+# entry whose document is not in the zip becomes a footprint that appears in the chooser
+# and fails to load - which aborts the scan of the whole library, hiding every other part
+# in it. Entries like that are left behind whenever a document could not be read, so the
+# library has to be pruned to what it actually contains on every write.
+def pruneOrphans(libDeviceFile, symbolDocs, footprintDocs):
+    dropped = 0
+
+    for entry_type, docs in (("symbols", symbolDocs), ("footprints", footprintDocs)):
+        for uuid in [u for u in libDeviceFile[entry_type] if u not in docs]:
+            warning(f"Dropping {entry_type[:-1]} '{entryTitle(libDeviceFile[entry_type][uuid])}'"
+                    " from the library index: its document is missing, and KiCad stops"
+                    " reading a library at the first entry it cannot load.")
+            del libDeviceFile[entry_type][uuid]
+            dropped += 1
+
+    # A device pointing at a dropped document cannot be placed either.
+    for uuid in [u for u, d in libDeviceFile["devices"].items()
+                 if (d.get("attributes") or {}).get("Symbol") not in libDeviceFile["symbols"]
+                 or (d.get("attributes") or {}).get("Footprint") not in libDeviceFile["footprints"]]:
+        warning(f"Dropping device '{entryTitle(libDeviceFile['devices'][uuid])}'"
+                " from the library index: its symbol or footprint document is missing.")
+        del libDeviceFile["devices"][uuid]
+        dropped += 1
+
+    return dropped
+
+
+# KiCad names a footprint after its device.json title, so two documents sharing a title
+# leave one of them unreachable. The uuid that sorts first keeps the plain name, which
+# keeps whatever a board already references resolving to the same document.
+def uniquifyTitles(entries):
+    seen = {}
+
+    for uuid in sorted(entries):
+        title = entryTitle(entries[uuid])
+
+        if title not in seen:
+            seen[title] = uuid
+            continue
+
+        unique = f"{title} ({uuid[:4]})"
+        warning(f"Renaming a second '{title}' to '{unique}': KiCad can only reach one"
+                " document per name.")
+        entries[uuid]["display_title"] = unique
+        seen[unique] = uuid
+
+
 class ComponentLoader():
     def __init__(self, kiprjmod, target_path, target_name, progress: Callable[[int, int], None], session: requests.Session):
         self.kiprjmod = kiprjmod
@@ -295,6 +348,9 @@ class ComponentLoader():
                                 footprint_data_str[footprint_uuid] = old_zip.read(name).decode('utf-8')
         except Exception as e:
             warning(f"Failed to merge device.json data, overwriting: {e}")
+
+        pruneOrphans(merged_data, symbol_data_str, footprint_data_str)
+        uniquifyTitles(merged_data["footprints"])
 
         with zipfile.ZipFile(zip_filename, "w", compression=zipfile.ZIP_DEFLATED) as zf:
             zf.writestr("device.json", json.dumps(merged_data, indent=4))
