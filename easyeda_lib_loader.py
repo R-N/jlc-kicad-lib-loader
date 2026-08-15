@@ -35,6 +35,34 @@ DEFAULT_USER_AGENT = f"jlc-kicad-lib-loader/{__version__}"
 session = requests.Session()
 session.headers.update({"User-Agent": DEFAULT_USER_AGENT})
 
+def isUuid(value):
+    """True for a bare 32-hex EasyEDA uuid (used to search by uuid directly)."""
+    return len(value) == 32 and all(c in "0123456789abcdefABCDEF" for c in value)
+
+def contributorOf(entry):
+    """Best-effort contributor/owner nickname from a search or detail entry."""
+    for key in ("creator", "owner"):
+        who = entry.get(key) or {}
+        if who.get("nickname"):
+            return who["nickname"]
+        if who.get("username"):
+            return who["username"]
+
+    return ""
+
+def thumbUrl(result, uuid):
+    """Absolute https URL of a component thumbnail.
+
+    EasyEDA Std renders both symbol and footprint documents at
+    image.easyeda.com/components/<uuid>.png, even when the JSON has no "thumb".
+    """
+    thumb = (result or {}).get("thumb")
+
+    if thumb:
+        return "https:" + thumb if thumb.startswith("//") else thumb
+
+    return f"https://image.easyeda.com/components/{uuid}.png" if uuid else None
+
 wx_html2_available = True
 try: 
     import wx.html2
@@ -174,7 +202,9 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
             
             # Check if library exists in tables and prompt to add if not
             if library_manager:
-                library_manager.prompt_add_library(dlg, target_name, target_path)
+                proComponents, stdComponents = splitSources(components)
+                sources = (["pro"] if proComponents else []) + (["std"] if stdComponents else [])
+                library_manager.prompt_add_library(dlg, target_name, target_path, sources)
 
             def threadedFn():
                 loader = ComponentLoader(kiprjmod=kiprjmod, target_path=target_path, target_name=target_name, progress=progressHandler, session=session)
@@ -185,6 +215,89 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
             dlg.m_actionBtn.Disable()
             self.downloadThread = Thread(target = threadedFn, daemon=True)
             self.downloadThread.start()
+
+        def stdSearchFn(words, page):
+            def setStatus( status ):
+                wx.CallAfter(dlg.m_searchStatus.SetLabel, status)
+                wx.CallAfter(dlg.m_statusPanel.Layout)
+
+            def appendItem( data ):
+                treeItem = dlg.m_searchResultsTree.AppendItem( dlg.m_searchResultsTree.GetRootItem(), data[0] )
+
+                for i in range(1, len(data)):
+                    dlg.m_searchResultsTree.SetItemText(treeItem, i, data[i]);
+
+            setStatus("Searching...")
+            wx.CallAfter(dlg.m_searchResultsTree.DeleteAllItems)
+            wx.CallAfter(dlg.m_prevPageBtn.Disable)
+            wx.CallAfter(dlg.m_nextPageBtn.Disable)
+
+            try:
+                if isUuid(words.strip()):
+                    # Direct uuid search: fetch the single component and show it as one result
+                    resp = session.get(STD_COMPONENT_URL.format(uuid=words.strip()))
+                    resp.raise_for_status()
+                    found = resp.json()
+
+                    debug(json.dumps(found, indent=4))
+
+                    if not found.get("success") or not found.get("result"):
+                        raise Exception(f"Unable to fetch component: {found}")
+
+                    result = {"page": 1, "totalPage": 1, "facets": {"user": 1},
+                              "lists": {"user": [found["result"]]}}
+                else:
+                    resp = session.post( STD_SEARCH_URL, data={
+                        "type": 3,
+                        "uid": "user",
+                        "wd": words,
+                        "page": page,
+                        "pageSize": 50,
+                        "returnListStyle": "classifyarr"
+                    } )
+                    resp.raise_for_status()
+                    found = resp.json()
+
+                    debug(json.dumps(found, indent=4))
+
+                    if not found.get("success") or not found.get("result"):
+                        raise Exception(f"Unable to search: {found}")
+
+                    result = found["result"]
+
+                for entry in result["lists"].get("user", []):
+                    c_para = (entry.get("dataStr") or {}).get("head", {}).get("c_para") or {}
+
+                    wx.CallAfter(appendItem, [
+                        STD_PREFIX + entry["uuid"],
+                        entry.get("title", ""),
+                        c_para.get("Manufacturer") or c_para.get("BOM_Manufacturer", ""),
+                        c_para.get("name", ""),
+                        c_para.get("package", ""),
+                        contributorOf(entry)
+                    ])
+
+                curPage = int(result["page"])
+                totalPages = int(result["totalPage"])
+
+                if(curPage > 1):
+                    wx.CallAfter(dlg.m_prevPageBtn.Enable)
+
+                if(curPage < totalPages):
+                    wx.CallAfter(dlg.m_nextPageBtn.Enable)
+
+                setStatus(f"{result['facets'].get('user', 0)} parts.")
+                wx.CallAfter(dlg.m_searchPage.SetLabel, f"Page {curPage}/{totalPages}")
+                wx.CallAfter(dlg.m_statusPanel.Layout)
+
+            except KeyboardInterrupt:
+                print("KeyboardInterrupt.")
+            except Exception as e:
+                traceback.print_exc()
+                setStatus(f"Failed to search parts: {e}")
+
+            finally:
+                self.searchThread = None
 
         def searchFn(facet, words, page):
             def setStatus( status ):
@@ -248,7 +361,8 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
                             entry["display_title"],
                             entry["attributes"].get("Manufacturer", ""),
                             entry["symbol"]["display_title"] if entry.get("symbol") else "",
-                            entry["footprint"]["display_title"] if entry.get("footprint") else ""
+                            entry["footprint"]["display_title"] if entry.get("footprint") else "",
+                            contributorOf(entry)
                         ])
 
                 curPage = int(found['result']['page'])
@@ -277,11 +391,16 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
                 interrupt_thread(self.searchThread)
                 self.searchThread.join()
 
-            facet = [None, "lcsc", "user"][facetId]
+            # Choice order: All Sources, JLC System, JLC Public, EasyEDA Std Public
+            if facetId == 3:
+                self.searchThread = Thread(target = stdSearchFn,
+                                     daemon=True,
+                                     args=(words, page))
+            else:
+                self.searchThread = Thread(target = searchFn, 
+                                     daemon=True, 
+                                     args=([None, "lcsc", "user"][facetId], words, page))
 
-            self.searchThread = Thread(target = searchFn, 
-                                 daemon=True, 
-                                 args=(facet, words, page))
             self.searchThread.start()
 
         def onSearch( event ):
@@ -304,8 +423,39 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
 
         def onSearchItemSelected( event ):
             itemCode = dlg.m_searchResultsTree.GetItemText(event.GetItem())
+            attributes = {}
+            preview_title = ""
+            preview_image = ""
+            preview_fp_image = ""
 
-            if itemCode.startswith("C"):
+            if itemCode.startswith(STD_PREFIX):
+                stdUuid = itemCode[len(STD_PREFIX):]
+
+                try:
+                    comp_info = session.get(STD_COMPONENT_URL.format(uuid=stdUuid))
+                    comp_info.raise_for_status()
+                    debug("std component info: " + json.dumps(comp_info.json(), indent=4))
+                    result = comp_info.json()["result"]
+
+                    attributes = dict((result.get("dataStr") or {}).get("head", {}).get("c_para") or {})
+                    preview_title = result.get("title", "")
+                    preview_image = thumbUrl(result, stdUuid) or ""
+
+                    if result.get("packageDetail"):
+                        package = result["packageDetail"]
+                        attributes["Footprint"] = package.get("title", "")
+                        preview_fp_image = thumbUrl(package, package.get("uuid")) or ""
+                except Exception as e:
+                    traceback.print_exc()
+                    warning(f"Failed to load component info for {stdUuid}: {e}")
+
+                dlg.m_searchHyperlink1.SetLabelText( "Open in EasyEDA Std" )
+                dlg.m_searchHyperlink1.SetURL( f"https://easyeda.com/component/{stdUuid}" )
+                dlg.m_searchHyperlink1.Show()
+
+                dlg.m_searchHyperlink2.Hide()
+                dlg.m_searchHyperlink3.Hide()
+            elif itemCode.startswith("C"):
                 dlg.m_searchHyperlink1.SetLabelText( f"{itemCode} Preview" )
                 dlg.m_searchHyperlink1.SetURL( f"https://jlcpcb.com/user-center/lcsvg/svg.html?code={itemCode}" )
                 dlg.m_searchHyperlink1.Show()
@@ -383,7 +533,25 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
                             border:1px solid #CCC;
                             padding: 2px;
                         }
+                        figure {
+                            display: inline-block;
+                            margin: 0 12px 4px 0;
+                            text-align: center;
+                        }
+                        figcaption {
+                            color: #666;
+                            font-size: 90%;
+                        }
                     """
+                    heading = preview_title or f"Device UUID: {itemCode}"
+
+                    def figure( label, url ):
+                        # Hide the figure if EasyEDA has no rendering for that document
+                        return (f'<figure><img src="{url}" style="max-width:220px; max-height:220px;"'
+                                f' onerror="this.parentNode.style.display=\'none\'"/>'
+                                f'<figcaption>{label}</figcaption></figure>') if url else ""
+
+                    image_html = figure("Symbol", preview_image) + figure("Footprint", preview_fp_image)
 
                     html_content = f"""
                     <html>
@@ -393,7 +561,8 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
                         </style>
                     </head>
                     <body>
-                        <p><b>Device UUID: {itemCode}</b></p>
+                        {image_html}
+                        <p><b>{heading}</b></p>
                         <table>
                             {table_rows}
                         </table>
@@ -425,6 +594,7 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
         dlg.m_searchResultsTree.AppendColumn("Manufacturer", width=wx.COL_WIDTH_AUTOSIZE, flags=wx.COL_RESIZABLE | wx.COL_SORTABLE)
         dlg.m_searchResultsTree.AppendColumn("Symbol", width=wx.COL_WIDTH_AUTOSIZE, flags=wx.COL_RESIZABLE | wx.COL_SORTABLE)
         dlg.m_searchResultsTree.AppendColumn("Footprint", width=wx.COL_WIDTH_AUTOSIZE, flags=wx.COL_RESIZABLE | wx.COL_SORTABLE)
+        dlg.m_searchResultsTree.AppendColumn("Contributor", width=wx.COL_WIDTH_AUTOSIZE, flags=wx.COL_RESIZABLE | wx.COL_SORTABLE)
 
         # Load library name from config or use default
         default_lib_name = "EasyEDA_Lib"

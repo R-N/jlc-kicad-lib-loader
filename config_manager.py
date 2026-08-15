@@ -56,6 +56,25 @@ class LibraryTableManager:
         self.sym_lib_table_path = os.path.join(kiprjmod, "sym-lib-table")
         self.fp_lib_table_path = os.path.join(kiprjmod, "fp-lib-table")
     
+    # Library entry formats: KiCad's native EasyEDA importers, keyed by (source, table type)
+    LIB_ENTRY_TYPES = {
+        ("pro", "symbol"): "EasyEDA (JLCEDA) Pro",
+        ("pro", "footprint"): "EasyEDA / JLCEDA Pro",
+        ("std", "symbol"): "EasyEDA (JLCEDA) Std",
+        ("std", "footprint"): "EasyEDA / JLCEDA Std",
+    }
+
+    @staticmethod
+    def entry_name(lib_name, source):
+        """Library table entry name for a source ("pro" or "std")"""
+        return lib_name if source == "pro" else f"{lib_name}_Std"
+
+    @staticmethod
+    def entry_uri(lib_name, source):
+        """Library file URI for a source ("pro" or "std")"""
+        file_name = f"{lib_name}.elibz" if source == "pro" else f"{lib_name}-std.zip"
+        return f"${{KIPRJMOD}}/{lib_name}/{file_name}"
+
     def check_library_exists(self, lib_name, lib_type="symbol"):
         """Check if a library exists in the library table
         
@@ -82,25 +101,24 @@ class LibraryTableManager:
             warning(f"Failed to read {lib_type} library table: {e}")
             return False
     
-    def add_library_to_table(self, lib_name, lib_path, lib_type="symbol"):
+    def add_library_to_table(self, lib_name, lib_path, lib_type="symbol", source="pro"):
         """Add a library to the library table
         
         Args:
             lib_name: Name of the library
             lib_path: Path to the library file (relative to project)
             lib_type: Either "symbol" or "footprint"
+            source: Either "pro" (.elibz) or "std" (-std.zip)
         
         Returns:
             True if successful, False otherwise
         """
         table_path = self.sym_lib_table_path if lib_type == "symbol" else self.fp_lib_table_path
         
-        # Determine the library entry format for EasyEDA library
-        # Both symbol and footprint libraries use the same .elibz file
-        if lib_type == "symbol":
-            lib_entry = f'  (lib (name "{lib_name}")(type "EasyEDA (JLCEDA) Pro")(uri "${{KIPRJMOD}}/{lib_name}/{lib_name}.elibz")(options "")(descr ""))\n'
-        else:
-            lib_entry = f'  (lib (name "{lib_name}")(type "EasyEDA / JLCEDA Pro")(uri "${{KIPRJMOD}}/{lib_name}/{lib_name}.elibz")(options "")(descr ""))\n'
+        # Symbol and footprint libraries of one source share the same file
+        lib_entry = (f'  (lib (name "{self.entry_name(lib_name, source)}")'
+                     f'(type "{self.LIB_ENTRY_TYPES[(source, lib_type)]}")'
+                     f'(uri "{self.entry_uri(lib_name, source)}")(options "")(descr ""))\n')
         
         try:
             # Create table if it doesn't exist
@@ -140,32 +158,34 @@ class LibraryTableManager:
             error(f"Failed to add library to {lib_type} table: {e}")
             return False
     
-    def prompt_add_library(self, parent, lib_name, lib_path):
+    def prompt_add_library(self, parent, lib_name, lib_path, sources=("pro",)):
         """Prompt user to add library to symbol and footprint tables
         
         Args:
             parent: Parent window for the dialog
             lib_name: Name of the library
             lib_path: Path to the library
+            sources: Which library sources are being downloaded ("pro", "std")
         
         Returns:
             True if libraries were added or already exist, False if user cancelled
         """
-        symbol_exists = self.check_library_exists(lib_name, "symbol")
-        footprint_exists = self.check_library_exists(lib_name, "footprint")
+        # (source, table type) pairs that still need an entry
+        missing = [(source, lib_type)
+                   for source in sources
+                   for lib_type in ("symbol", "footprint")
+                   if not self.check_library_exists(self.entry_name(lib_name, source), lib_type)]
         
-        if symbol_exists and footprint_exists:
-            debug(f"Library {lib_name} already exists in both tables")
+        if not missing:
+            debug(f"Library {lib_name} already exists in all tables")
             return True
         
-        # Build message
-        missing_libs = []
-        if not symbol_exists:
-            missing_libs.append("Symbol")
-        if not footprint_exists:
-            missing_libs.append("Footprint")
+        missing_names = sorted({self.entry_name(lib_name, source) for source, _ in missing})
+        missing_types = sorted({lib_type.capitalize() for _, lib_type in missing})
+        names_text = "' and '".join(missing_names)
         
-        msg = f"The library '{lib_name}' is not found in the project-specific {' and '.join(missing_libs)} library table(s).\n\n"
+        msg = (f"The library '{names_text}' is not found in the project-specific "
+               f"{' and '.join(missing_types)} library table(s).\n\n")
         msg += "Would you like to add it automatically?"
         
         dlg = wx.MessageDialog(
@@ -181,18 +201,14 @@ class LibraryTableManager:
         if result == wx.ID_YES:
             success = True
             
-            if not symbol_exists:
-                if not self.add_library_to_table(lib_name, lib_path, "symbol"):
-                    success = False
-            
-            if not footprint_exists:
-                if not self.add_library_to_table(lib_name, lib_path, "footprint"):
+            for source, lib_type in missing:
+                if not self.add_library_to_table(lib_name, lib_path, lib_type, source):
                     success = False
             
             if success:
                 info_dlg = wx.MessageDialog(
                     parent,
-                    f"Library '{lib_name}' has been added to the project library tables.\n\n"
+                    f"Library '{names_text}' has been added to the project library tables.\n\n"
                     "Note: You may need to restart KiCad for the changes to take effect.",
                     "Library Added Successfully",
                     wx.OK | wx.ICON_INFORMATION

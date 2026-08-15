@@ -35,7 +35,7 @@ class EasyEdaLibLoaderDialog ( wx.Dialog ):
 
 		bSizer5 = wx.BoxSizer( wx.HORIZONTAL )
 
-		m_libSourceChoiceChoices = [ u"All Sources", u"JLC System", u"JLC Public" ]
+		m_libSourceChoiceChoices = [ u"All Sources", u"JLC System", u"JLC Public", u"EasyEDA Std Public" ]
 		self.m_libSourceChoice = wx.Choice( self.m_leftPanel, wx.ID_ANY, wx.DefaultPosition, wx.DefaultSize, m_libSourceChoiceChoices, 0 )
 		self.m_libSourceChoice.SetSelection( 0 )
 		bSizer5.Add( self.m_libSourceChoice, 0, wx.ALIGN_CENTER_VERTICAL|wx.ALL, 5 )

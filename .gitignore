@@ -1,3 +1,5 @@
 __pycache__/
 .vscode/
-.out/archive/
+out/
+jlc-kicad-lib-loader-*.zip
+.codegraph/
