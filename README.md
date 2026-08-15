@@ -112,6 +112,10 @@ can also paste such lines manually. They are stored in a separate file because K
 with its native "EasyEDA (JLCEDA) Std" importers, and are registered as a separate library named
 `<LibName>_Std` in the project library tables. Both sources can be downloaded in one run.
 
+Symbols and footprints are separate documents on EasyEDA Std. A symbol may carry an inline
+footprint, or none at all; a footprint on its own (no symbol) is also downloadable and lands in
+the footprint library. If a symbol reports no footprint, search for the footprint by name.
+
 3D models of both sources go to `EASYEDA_MODELS` in the project directory.
 
 If you add the `-std.zip` library by hand instead, select the library type explicitly:

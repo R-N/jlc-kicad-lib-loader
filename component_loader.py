@@ -473,21 +473,35 @@ class ComponentLoader():
         modelTasks = {}
 
         for uuid, component in fetched.items():
-            symDataStr = component.get("dataStr")
+            dataStr = component.get("dataStr")
 
-            if not symDataStr:
-                warning(f"Component {uuid} has no symbol data, skipping.")
+            if not dataStr:
+                warning(f"Component {uuid} has no document data, skipping.")
                 continue
 
-            symParams = (symDataStr.get("head") or {}).get("c_para") or {}
-            symbolName = symParams.get("name") or component.get("title") or uuid
-            symbolShapes[symbolName] = buildStdLibShape(symDataStr, {"spiceSymbolName": symbolName},
+            head = dataStr.get("head") or {}
+            params = head.get("c_para") or {}
+
+            # EasyEDA Std serves symbols (docType 2) and standalone PCB footprints
+            # (docType 4) from the same endpoint. Footprints have no packageDetail:
+            # the document itself is the footprint.
+            if str(head.get("docType")) == "4":
+                packageName = params.get("package") or component.get("title") or uuid
+                layers = layers or dataStr.get("layers") or []
+                footprintShapes[packageName] = buildStdLibShape(dataStr, {"package": packageName},
+                                                                f"gge{len(footprintShapes) + 1}")
+                modelTasks.update(self.collectStdModels(dataStr))
+                continue
+
+            symbolName = params.get("name") or component.get("title") or uuid
+            symbolShapes[symbolName] = buildStdLibShape(dataStr, {"spiceSymbolName": symbolName},
                                                         f"gge{len(symbolShapes) + 1}")
 
             package = component.get("packageDetail")
 
             if not package or not package.get("dataStr"):
-                info(f"Component '{symbolName}' has no footprint.")
+                info(f"Component '{symbolName}' has no footprint document."
+                     f" A standalone footprint may be listed separately in the search results.")
                 continue
 
             fpDataStr = package["dataStr"]
