@@ -698,6 +698,11 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
         
         dlg.m_searchResultsTree.Bind(wx.dataview.EVT_TREELIST_ITEM_ACTIVATED, onSearchItemActivated)
         dlg.m_searchResultsTree.Bind(wx.dataview.EVT_TREELIST_SELECTION_CHANGED, onSearchItemSelected)
+
+        # The preview builder, kept reachable so it can be driven directly: a
+        # simulated click only lands when the window really holds focus, which
+        # is not true in every environment tests run in.
+        self.onSearchItemSelected = onSearchItemSelected
         dlg.m_actionBtn.Bind(wx.EVT_BUTTON, onDownload)
         dlg.m_searchBtn.Bind(wx.EVT_BUTTON, onSearch)
         dlg.m_prevPageBtn.Bind(wx.EVT_BUTTON, onPrevPage)

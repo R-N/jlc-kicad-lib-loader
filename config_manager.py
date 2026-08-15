@@ -114,6 +114,12 @@ class LibraryTableManager:
             True if successful, False otherwise
         """
         table_path = self.sym_lib_table_path if lib_type == "symbol" else self.fp_lib_table_path
+
+        # A repeated nickname makes KiCad reject the whole table, so never write
+        # one even if a caller skipped its own existence check.
+        if self.check_library_exists(self.entry_name(lib_name, source), lib_type):
+            debug(f"{self.entry_name(lib_name, source)} is already in the {lib_type} table")
+            return True
         
         # Symbol and footprint libraries of one source share the same file
         lib_entry = (f'  (lib (name "{self.entry_name(lib_name, source)}")'

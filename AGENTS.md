@@ -4,7 +4,7 @@
 
 `jlc-kicad-lib-loader` is a KiCad 8+ Action Plugin (pcbnew) that searches JLCPCB/LCSC/EasyEDA Pro parts and imports them into a project-local `.elibz` library plus converted STEP 3D models. It is distributed as a KiCad PCM archive (`com.github.dsa-t.jlc-kicad-lib-loader`).
 
-Flat, non-packaged Python: every `.py` at the repo root is copied verbatim into the archive's `plugins/` directory. There is no installable package, no dependency manifest, and no test suite.
+Flat, non-packaged Python: every `.py` at the repo root is copied verbatim into the archive's `plugins/` directory. There is no installable package and no dependency manifest. Tests live in `tests/` and are plain `assert` scripts — **keep them out of the repo root**, or the build ships them to users.
 
 ## Architecture & Data Flow
 
@@ -32,7 +32,7 @@ Detail-fetch failures are logged with `warning(...)` so the pane can never go bl
 
 **Download flow**: `onDownload` (~139-187) reads part codes/UUIDs from `m_textCtrlParts`, resolves the target path (`lib_field` if absolute, else `$KIPRJMOD/<lib_field>`), persists the library name, prompts to register library tables, then a daemon `downloadThread` runs `ComponentLoader(...).downloadAll`:
 
-1. `downloadSymFp` (Pro) — `C…` codes resolved via `searchByCodes`, then `GET /api/devices/{uuid}` and `GET /api/v2/components/{uuid}` through two `ThreadPoolExecutor` pools; `extractDataStr` falls back to fetching `dataStrId` and decrypting it; writes/merges the zip `<target>/<name>.elibz` containing `device.json`, `SYMBOL/<uuid>.esym`, `FOOTPRINT/<uuid>.efoo` (pre-existing entries are merged, not clobbered).
+1. `downloadSymFp` (Pro) — `C…` codes resolved via `searchByCodes`, then `GET /api/devices/{uuid}` and `GET /api/v2/components/{uuid}` through two `ThreadPoolExecutor` pools; `extractDataStr` falls back to fetching `dataStrId` and decrypting it; writes/merges the zip `<target>/<name>.elibz` containing `device.json`, `SYMBOL/<uuid>.esym`, `FOOTPRINT/<uuid>.efoo` (pre-existing entries are merged, not clobbered). A document that cannot be read is `warning`-ed by uuid and left out, and the closing summary counts what actually reached the zip — not what was fetched, which used to report symbols the library did not contain.
 2. `downloadStd` (Std) — `GET https://easyeda.com/api/components/{uuid}` returns either a symbol or a standalone footprint, disambiguated by `result.dataStr.head.docType` (**2** = symbol, **4** = footprint). A symbol's footprint comes from `result.packageDetail.dataStr` (also `docType 4`, structurally identical to a standalone footprint doc); a footprint document has no `packageDetail` — it *is* the footprint. Each document is wrapped verbatim in a `LIB~x~y~params~…#@$<shapes>` string (`buildStdLibShape`) and written to `<target>/<name>-std.zip` as `symbols.json` (a `docType 5` schematic list) and `footprints.json` (a `docType 3` PCB doc). This is exactly what KiCad's native Std importers enumerate — **no geometry conversion here, and none should be added**. Note the importers stop at the FIRST matching `.json` in a zip, which is why all symbols share one document and all footprints another.
 3. `downloadModels(modelTasks)` — shared by both sources; `modelTasks` maps model uuid -> `(target file, fit X mm, fit Y mm)`, built by `collectProModels` (`3D Model Transform`, mils) or `collectStdModels` (layer-19 `outline3D` SVGNODE, EasyEDA units of 10 mil via `STD_UNIT_TO_MM`). Downloads raw STEP to `<KIPRJMOD>/EASYEDA_MODELS/<title>.step` (always `KIPRJMOD` — both KiCad importers hardcode that path) via `urllib.request.urlretrieve` into a `<file>_jlc` temp (pool of 8), then a **single-threaded** pool runs `pcbnew.UTILS_STEP_MODEL.LoadSTEP` -> scale to fit -> translate to origin -> `SaveSTEP`. pcbnew is not thread-safe; keep that pool at 1.
 
@@ -43,14 +43,15 @@ Detail-fetch failures are logged with `warning(...)` so the pane can never go bl
 ## Key Directories
 
 - repo root — all plugin source; flat by design, shipped as-is.
+- `tests/` — `assert` scripts and captured fixtures; never shipped, because only root `.py` files are.
 - `pcm/` — packaging only: `metadata.template.json`, `icon.png` (copied to `resources/`).
 - `.github/workflows/` — single release workflow.
-- `.out/` — build output (`.out/archive/` is gitignored; the zip and `.out/env` are **not**).
+- `out/` — build output, gitignored along with `jlc-kicad-lib-loader-*.zip`. Not `.out/`: KiCad's "Install from File…" picker cannot see dot-directories.
 
 ## Development Commands
 
 ```bash
-./create_pcm_archive.sh              # build .out/jlc-kicad-lib-loader-<VERSION>-pcm.zip + .out/env
+./create_pcm_archive.sh              # build out/jlc-kicad-lib-loader-<VERSION>-pcm.zip + out/env
 CI_ENV=/tmp/env ./create_pcm_archive.sh   # redirect the env-var dump
 ```
 
@@ -102,15 +103,26 @@ Manual testing: copy the root `.py` files into the KiCad 3rd-party plugin dir (o
 
 ## Testing & QA
 
-There is no test framework, no `conftest.py`, no linter config, and no CI test step — verification is manual inside KiCad. When changing behavior:
+No framework, no `conftest.py`, no linter config, no CI test step: three `assert` scripts under `tests/`, each run directly.
 
-1. Build with `./create_pcm_archive.sh` and confirm the zip contents.
-2. Load the plugin in pcbnew, search a known part (e.g. `C25804`), download it, and confirm `<lib>.elibz` plus `EASYEDA_MODELS/*.step` appear and the library shows up in `sym-lib-table`/`fp-lib-table`.
-3. For pure-logic changes (decryption, transform math, `.elibz` merge), a standalone `assert`-based script run under a plain Python 3 interpreter is acceptable; keep `pcbnew` imports out of that path.
+```bash
+python3 tests/test_offline.py     # always; no network, ~0.5s
+python3 tests/smoke_download.py   # after touching the download path; network + pcbnew
+python3 tests/smoke_preview.py    # after touching the preview; network + wx WebView
+```
+
+- **`tests/test_offline.py`** — everything that is pure logic: `pro_render` against a captured real document (`tests/fixtures/pro_ams1117.json`, AMS1117/C6186) plus synthetic documents for the Y flip, unit scaling, pin direction, font ratio, pad shapes, contour tokens, layer filtering and empty/broken input; `component_loader`'s Std format, docType dispatch, merge and 3D unit conversion, driven through a fake session so no network is touched; `config_manager`'s library-table rows. Sections needing `requests`/`pcbnew`/`wx` skip themselves rather than fail. Prints a per-section report and a check count.
+- **`tests/smoke_download.py`** — downloads a real Pro part and a real Std part into a temp project, then makes **KiCad's own importers** enumerate and load the result (pad counts, extents) and checks the merge keeps existing entries. This is the contract that has actually broken before; the offline suite cannot cover it.
+- **`tests/smoke_preview.py`** — opens the real dialog and checks all four preview branches (Pro with an LCSC code, Pro drawn from scratch, a document with no geometry, and Std). It clicks with `wx.UIActionSimulator` when the window takes focus and otherwise calls `plugin.onSearchItemSelected` directly, so it works on a desktop and under a nested X server alike.
+
+Assertions must not compute their expectation from the constant they are testing — pin the number KiCad's importer produces (`font-size="6.200"`, not `10 * FONT_CAP_RATIO`). Fixtures are captured from the live API; the shape counts they contain are quoted in the comments, so a swapped fixture shows up as a mismatch rather than a silent pass.
+
+Still manual, because no script can judge it: build with `./create_pcm_archive.sh`, install the zip in KiCad, download a part, and look at the symbol and footprint in eeschema and pcbnew.
 
 ## Gotchas
 
 - Bumping the release version means editing `VERSION="…"` in `create_pcm_archive.sh` — the git tag does not drive it.
-- `.out/*.zip` and `.out/env` are not gitignored; do not commit them.
+- A new `.py` at the repo root is shipped to users — put test and scratch scripts in `tests/`.
+- Relative imports inside function bodies (`from . import decryptor`) break when the modules are imported flat, e.g. by a test harness; fall back to the absolute import.
 - STEP models always land under `$KIPRJMOD/EASYEDA_MODELS`, independent of the chosen library path.
 - `pcm/icon.png` is copied into `resources/` but `metadata.template.json` has no `icon` key referencing it.

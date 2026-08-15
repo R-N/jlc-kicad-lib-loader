@@ -215,6 +215,8 @@ class ComponentLoader():
             ds = self.extractDataStr(f_data)
             if ds:
                 footprint_data_str[f_uuid] = ds
+            else:
+                warning(f"Footprint {f_uuid} has no readable document and is left out of the library.")
 
             f_data.pop("dataStr", None) # Remove the dataStr field if exists
 
@@ -223,6 +225,8 @@ class ComponentLoader():
             ds = self.extractDataStr(s_data)
             if ds:
                 symbol_data_str[s_uuid] = ds
+            else:
+                warning(f"Symbol {s_uuid} has no readable document and is left out of the library.")
 
             s_data.pop("dataStr", None) # Remove the dataStr field if exists
 
@@ -265,8 +269,14 @@ class ComponentLoader():
             for sym_uuid, ds in symbol_data_str.items():
                 zf.writestr(f"SYMBOL/{sym_uuid}.esym", ds)
 
+        # Count what actually reached the zip: a device whose document could not
+        # be read is in device.json but has no symbol or footprint to load.
+        written_symbols = len(symbol_data_str.keys() & fetched_symbols.keys())
+        written_footprints = len(footprint_data_str.keys() & fetched_footprints.keys())
+
         info( "*****************************" )
-        info(f"Downloaded {len(fetched_devices)} devices, {len(fetched_symbols)} symbols, {len(fetched_footprints)} footprints and added to library: {zip_filename}")
+        info(f"Downloaded {len(fetched_devices)} devices, {written_symbols} symbols, "
+             f"{written_footprints} footprints and added to library: {zip_filename}")
         return libDeviceFile, fetched_3dmodels
 
     # Collect 3D model download tasks for Pro devices: { model uuid: (target file, fit X mm, fit Y mm) }
@@ -641,14 +651,21 @@ def extractDataStr(session, component_data):
 
             debug("dataStrId encrypted content: " + dataStrResp.content.hex())
 
-            from . import decryptor
+            try:
+                from . import decryptor
+            except ImportError:
+                # Also importable as loose modules, e.g. from a test harness.
+                import decryptor
+
             decryptedStr = decryptor.decryptDataStrIdData(dataStrResp.content, keyHex, ivHex)
 
             debug("dataStrId decrypted content: " + decryptedStr)
 
             return decryptedStr
         except Exception as e:
-            info(f"Failed to fetch/decrypt dataStrId: {e}")
+            # Loud: the part is left without its document, so the library entry
+            # would be unusable and the user has to know why.
+            warning(f"Failed to fetch/decrypt dataStrId: {e}")
 
     return None
 
