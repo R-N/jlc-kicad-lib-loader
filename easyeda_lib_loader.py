@@ -131,7 +131,7 @@ SOURCE_SEARCHES = []
 # Columns of the results grid, in order. The row builders below must match.
 # Eight columns share the results pane, so the headings are short enough not to be
 # truncated themselves; the widths fit "Extended", "Footprint" and a supplier name.
-RESULT_COLUMNS = (("Src", 64), ("Code", 90), ("Name", 118), ("MPN", 90),
+RESULT_COLUMNS = (("Src", 64), ("Code", 90), ("Name", 118), ("Description", 160),
                   ("Package", 84), ("Class", 88), ("Type", 74), ("By", 72))
 
 # Source labels, also what the Source column shows.
@@ -144,19 +144,33 @@ SOURCE_STD = "Std"
 # yet, which used to be labelled as user-contributed.
 PRO_FACET_SOURCE = {"lcsc": SOURCE_SYSTEM, "user": SOURCE_PUBLIC, "mine": SOURCE_PUBLIC}
 
+def tagText(tags):
+    """Category names from a Pro device's tags, for the search blob."""
+    out = []
+    for key in ("parent_tag", "child_tag"):
+        name = ((tags or {}).get(key) or {}).get("name") or ""
+        if name:
+            out.append(name)
+    return " ".join(out)
+
 def proRow(entry, source=SOURCE_PUBLIC):
     """A results row for an EasyEDA Pro device, as the search API returns it."""
     attributes = entry.get("attributes") or {}
     code = entry.get("product_code") or entry.get("uuid", "")
+    name = entry.get("display_title") or entry.get("title", "")
+    description = attributes.get("LCSC Part Name", "")
+
+    searchable = " ".join(filter(None, [
+        name,
+        entry.get("title", ""),
+        tagText(entry.get("tags")),
+        searchableText(attributes),
+    ]))
 
     return (source,
             code,
-            # The LCSC Part Name is the human-readable description ("100k ohm ±1%
-            # 62.5mW"); display_title is the part number, which already has its own
-            # MPN column. Showing both makes the two columns distinct instead of
-            # repeating the code twice.
-            attributes.get("LCSC Part Name") or entry.get("display_title") or entry.get("title", ""),
-            attributes.get("Manufacturer Part", ""),
+            name,
+            description,
             # The footprint document title is unreadable ("SOT-223-3_L6.5-W3.4-P2.30-LS7.0-BR");
             # the supplier's package name is what a person recognises.
             attributes.get("Supplier Footprint")
@@ -164,7 +178,7 @@ def proRow(entry, source=SOURCE_PUBLIC):
             (attributes.get("JLCPCB Part Class") or "").replace(" Part", ""),
             "Device",
             contributorOf(entry),
-            searchableText(attributes))
+            searchable)
 
 def stdRow(entry):
     """A results row for an EasyEDA Std component.
@@ -180,7 +194,7 @@ def stdRow(entry):
     return (SOURCE_STD,
             STD_PREFIX + entry["uuid"],
             entry.get("title", ""),
-            params.get("Manufacturer Part") or params.get("BOM_Manufacturer Part", ""),
+            "",
             params.get("package", ""),
             "",
             kind,
@@ -643,6 +657,16 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
                         traceback.print_exc()
                         counts.append(f"{label or 'search'} failed")
                         warning(f"Search failed: {e}")
+
+                # EasyEDA's search is fuzzy: "Resistor 100k" also returns 1Ω resistors
+                # and 10µH inductors. Narrow the page to rows matching every word the
+                # user typed, but only when that keeps a row - a term the data stores
+                # differently (a Chinese description, say) must not blank the page.
+                if words.strip():
+                    matches = [row for row in self.searchRows if rowMatches(row, words)]
+                    if matches:
+                        self.searchRows = matches
+                        wx.CallAfter(renderRows)
 
                 if page > 1:
                     wx.CallAfter(dlg.m_prevPageBtn.Enable)
