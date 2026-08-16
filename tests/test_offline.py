@@ -539,6 +539,43 @@ def test_part_aliases():
                "symbols": {}, "footprints": {}}
     check(cl.addPartAliases(missing, {}) == 0, "aliased a footprint with no document")
 
+    # The human description (LCSC Part Name) is a second alias, and a user alias
+    # typed in the queue is a third - matched by code or by uuid.
+    described = {
+        "devices": {
+            "dev": {"display_title": "AMS1117-3.3", "product_code": "C6186",
+                    "attributes": {"Manufacturer Part": "AMS1117-3.3",
+                                   "LCSC Part Name": "1A 3.3V regulator",
+                                   "Footprint": "fp"}},
+        },
+        "symbols": {}, "footprints": {"fp": {"display_title": "SOT-223"}},
+    }
+    check(cl.addPartAliases(described, {"fp": "doc"}, {"C6186": "my-regulator"}) == 3,
+          "expected MPN, description and custom aliases")
+    titles = sorted(cl.entryTitle(e) for e in described["footprints"].values())
+    check(titles == ["1A 3.3V regulator", "AMS1117-3.3", "SOT-223", "my-regulator"],
+          f"aliases wrong: {titles}")
+
+    # An empty or duplicate alias adds nothing extra.
+    described2 = {"devices": {"dev": {"product_code": "C1",
+                                      "attributes": {"Manufacturer Part": "X",
+                                                     "LCSC Part Name": "X",
+                                                     "Footprint": "fp"}}},
+                  "symbols": {}, "footprints": {"fp": {"display_title": "SOT-23"}}}
+    check(cl.addPartAliases(described2, {"fp": "d"}) == 1,
+          "description equal to the MPN must not add a second alias")
+
+    # The symbol document's own name is an alias too, so a footprint is findable by
+    # whatever the symbol chooser calls it - even when that differs from the MPN.
+    symboled = {"devices": {"dev": {"product_code": "C9",
+                                    "attributes": {"Manufacturer Part": "AO3401A",
+                                                   "Footprint": "fp"},
+                                    "symbol": {"display_title": "P-MOSFET"}}},
+                "symbols": {}, "footprints": {"fp": {"display_title": "SOT-23"}}}
+    check(cl.addPartAliases(symboled, {"fp": "d"}) == 2, "MPN and symbol name aliases expected")
+    titles = sorted(cl.entryTitle(e) for e in symboled["footprints"].values())
+    check(titles == ["AO3401A", "P-MOSFET", "SOT-23"], f"symbol alias missing: {titles}")
+
 
 def test_alias_runaway_cleanup():
     import component_loader as cl

@@ -181,9 +181,10 @@ def aliasUuid(key, name):
     return hashlib.md5(f"{key}:{name}".encode("utf-8")).hexdigest()
 
 
-def addPartAliases(libDeviceFile, footprintDocs):
+def addPartAliases(libDeviceFile, footprintDocs, customAliases=None):
     footprints = libDeviceFile["footprints"]
     devices = libDeviceFile["devices"]
+    customAliases = customAliases or {}
 
     def partName(device):
         attributes = device.get("attributes") or {}
@@ -194,6 +195,27 @@ def addPartAliases(libDeviceFile, footprintDocs):
 
     def partNamed(title):
         return any(title == name or title.startswith(name + " (") for name in partNames)
+
+    def aliasNames(device, deviceUuid):
+        """Names to file this device's footprint under: the part number, the human
+        description (LCSC Part Name), the symbol document's name, and whatever alias
+        the user typed in the queue - deduplicated and non-empty. The queue alias is
+        matched by code or by uuid."""
+        attributes = device.get("attributes") or {}
+        symbolName = (device.get("symbol") or {}).get("display_title", "")
+        names = []
+
+        for name in (partName(device),
+                     attributes.get("LCSC Part Name", ""),
+                     symbolName,
+                     customAliases.get(deviceUuid, ""),
+                     customAliases.get(device.get("product_code") or "", "")):
+            name = (name or "").strip()
+
+            if name and name not in names:
+                names.append(name)
+
+        return names
 
     # Drop the aliases this pass created last time, marked so they are unambiguous.
     for uuid in [u for u, entry in footprints.items() if entry.get(ALIAS_MARKER)]:
@@ -219,39 +241,42 @@ def addPartAliases(libDeviceFile, footprintDocs):
         footprints.pop(uuid, None)
         footprintDocs.pop(uuid, None)
 
-    # One deterministic alias per real device.
+    # One deterministic alias per name a part is known by.
     added = 0
     for deviceUuid, device in list(devices.items()):
-        name = partName(device)
         footprintUuid = (device.get("attributes") or {}).get("Footprint")
 
-        if not name or footprintUuid not in footprintDocs:
+        if footprintUuid not in footprintDocs:
             continue
 
         entry = footprints.get(footprintUuid)
 
-        if entry is None or entryTitle(entry) == name:
+        if entry is None:
             continue
 
-        uuid = aliasUuid(deviceUuid, name)
+        for name in aliasNames(device, deviceUuid):
+            if entryTitle(entry) == name:
+                continue
 
-        if uuid in footprints:
-            continue
+            uuid = aliasUuid(deviceUuid, name)
 
-        alias = copy.deepcopy(entry)
-        alias["uuid"] = uuid
-        alias["display_title"] = name
-        alias["title"] = name.lower()
-        alias[ALIAS_MARKER] = True
-        footprints[uuid] = alias
-        footprintDocs[uuid] = footprintDocs[footprintUuid]
+            if uuid in footprints:
+                continue
 
-        aliasDevice = copy.deepcopy(device)
-        aliasDevice["uuid"] = aliasUuid(deviceUuid, name + ":dev")
-        aliasDevice["attributes"]["Footprint"] = uuid
-        aliasDevice[ALIAS_MARKER] = True
-        devices[aliasDevice["uuid"]] = aliasDevice
-        added += 1
+            alias = copy.deepcopy(entry)
+            alias["uuid"] = uuid
+            alias["display_title"] = name
+            alias["title"] = name.lower()
+            alias[ALIAS_MARKER] = True
+            footprints[uuid] = alias
+            footprintDocs[uuid] = footprintDocs[footprintUuid]
+
+            aliasDevice = copy.deepcopy(device)
+            aliasDevice["uuid"] = aliasUuid(deviceUuid, name + ":dev")
+            aliasDevice["attributes"]["Footprint"] = uuid
+            aliasDevice[ALIAS_MARKER] = True
+            devices[aliasDevice["uuid"]] = aliasDevice
+            added += 1
 
     return added
 
@@ -267,7 +292,7 @@ class ComponentLoader():
     # Downloads everything and returns what reached the library, so the caller can show an
     # outcome instead of making the user read the log:
     # { symbols, footprints, models, skipped, failed, error }
-    def downloadAll(self, components):
+    def downloadAll(self, components, aliases=None):
         self.progress(0, 100)
 
         proComponents, stdComponents = splitSources(components)
@@ -280,7 +305,7 @@ class ComponentLoader():
 
             if proComponents:
                 libDeviceFile, fetched_3dmodels, proSymbols, proFootprints, proFailed = \
-                    self.downloadSymFp(proComponents)
+                    self.downloadSymFp(proComponents, aliases)
                 summary["symbols"] += proSymbols
                 summary["footprints"] += proFootprints
                 fetchFailures += proFailed
@@ -314,7 +339,7 @@ class ComponentLoader():
         info("Restart pcbnew to use new footprints: KiCad does not rescan EasyEDA")
         info("libraries while it is open, so the footprint chooser still shows the old list.")
 
-    def downloadSymFp(self, components):
+    def downloadSymFp(self, components, aliases=None):
         info(f"Fetching info...")
 
         # Separate components into code-based and direct UUIDs
@@ -471,7 +496,7 @@ class ComponentLoader():
             warning(f"Failed to merge device.json data, overwriting: {e}")
 
         pruneOrphans(merged_data, symbol_data_str, footprint_data_str)
-        addPartAliases(merged_data, footprint_data_str)
+        addPartAliases(merged_data, footprint_data_str, aliases)
         uniquifyTitles(merged_data["footprints"])
 
         with zipfile.ZipFile(zip_filename, "w", compression=zipfile.ZIP_DEFLATED) as zf:

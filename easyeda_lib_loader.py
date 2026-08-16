@@ -241,7 +241,7 @@ class PartQueue:
         if not code or code in self.entries:
             return False
 
-        self.entries[code] = (source, code, name)
+        self.entries[code] = (source, code, name, "")
 
         return True
 
@@ -274,7 +274,16 @@ class PartQueue:
         return list(self.entries.values())
 
     def codes(self):
-        return [code for _, code, _ in self.entries.values()]
+        return [code for _, code, _, _ in self.entries.values()]
+
+    def setAlias(self, code, alias):
+        """Set a custom footprint alias for a queued part; empty clears it."""
+        if code in self.entries:
+            source, _, name, _ = self.entries[code]
+            self.entries[code] = (source, code, name, (alias or "").strip())
+
+    def aliases(self):
+        return {code: alias for _, code, _, alias in self.entries.values() if alias}
 
     def __len__(self):
         return len(self.entries)
@@ -419,10 +428,11 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
         def refreshQueue():
             dlg.m_queueList.DeleteAllItems()
 
-            for source, code, name in self.queue.rows():
+            for source, code, name, alias in self.queue.rows():
                 row = dlg.m_queueList.InsertItem(dlg.m_queueList.GetItemCount(), source)
                 dlg.m_queueList.SetItem(row, 1, code)
                 dlg.m_queueList.SetItem(row, 2, name)
+                dlg.m_queueList.SetItem(row, 3, alias)
 
             dlg.m_queueLabel.SetLabel(
                 f"Queue: {len(self.queue)} part{'' if len(self.queue) == 1 else 's'}"
@@ -431,6 +441,25 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
             dlg.m_actionBtn.Enable(bool(self.queue) and not self.downloadThread)
             dlg.m_queueRemoveBtn.Enable(bool(self.queue))
             dlg.m_queueClearBtn.Enable(bool(self.queue))
+        def onQueueAlias( event ):
+            item = event.GetIndex()
+
+            if item < 0:
+                return
+
+            code = dlg.m_queueList.GetItemText(item, 1)
+            current = self.queue.aliases().get(code, "")
+
+            dialog = wx.TextEntryDialog(dlg,
+                                        f"Footprint alias for {code} (searchable name, empty clears it):",
+                                        "Set footprint alias", current)
+
+            if dialog.ShowModal() == wx.ID_OK:
+                self.queue.setAlias(code, dialog.GetValue())
+                refreshQueue()
+
+            dialog.Destroy()
+
 
         def queueRows( rows ):
             added = self.queue.addRows(rows)
@@ -529,7 +558,7 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
                 loader = ComponentLoader(kiprjmod=kiprjmod, target_path=target_path,
                                         target_name=target_name, progress=progressHandler,
                                         session=session)
-                summary = loader.downloadAll(components)
+                summary = loader.downloadAll(components, self.queue.aliases())
                 wx.CallAfter(onDownloadFinished, summary)
 
             setResult(f"Downloading {len(components)} part{'' if len(components) == 1 else 's'}…")
@@ -911,8 +940,6 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
                 interrupt_thread(self.downloadThread)
                 self.downloadThread.join( 5 )
 
-            event.Skip()
-
         for title, width in RESULT_COLUMNS:
             dlg.m_searchResultsTree.AppendColumn(title, width=width,
                                                  flags=wx.COL_RESIZABLE | wx.COL_SORTABLE)
@@ -920,7 +947,7 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
         for title, width in (("Parameter", 170), ("Value", 320)):
             dlg.m_paramsList.AppendColumn(title, width=width)
 
-        for title, width in (("Source", 90), ("Code / UUID", 300), ("Name", 300)):
+        for title, width in (("Source", 90), ("Code / UUID", 300), ("Name", 300), ("Alias", 200)):
             dlg.m_queueList.AppendColumn(title, width=width)
 
         # Load library name from config or use default
@@ -976,6 +1003,7 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
         dlg.m_queuePasteBtn.Bind(wx.EVT_BUTTON, onQueuePaste)
         dlg.m_queueRemoveBtn.Bind(wx.EVT_BUTTON, onQueueRemove)
         dlg.m_queueClearBtn.Bind(wx.EVT_BUTTON, onQueueClear)
+        dlg.m_queueList.Bind(wx.EVT_LIST_ITEM_ACTIVATED, onQueueAlias)
         dlg.m_browseBtn.Bind(wx.EVT_BUTTON, onBrowse)
 
         # Reachable for tests: a simulated click only lands when the window really
