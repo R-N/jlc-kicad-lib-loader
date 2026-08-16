@@ -469,7 +469,8 @@ def test_part_aliases():
     titles = sorted(cl.entryTitle(e) for e in lib["footprints"].values())
     check(titles == ["AO3401A", "SOT-23_L2.9-W1.3-P1.90-LS2.4-BR"], f"titles are {titles}")
 
-    alias_uuid = cl.aliasUuid("fp", "AO3401A")
+    # The alias uuid keys on the device, so the same part re-downloaded gives the same alias.
+    alias_uuid = cl.aliasUuid("dev", "AO3401A")
     check(alias_uuid in lib["footprints"], "alias not keyed by its own uuid")
     check(docs[alias_uuid] == docs["fp"], "alias must carry the same document")
     # The package entry is what placed boards reference; renaming it would break them.
@@ -485,6 +486,7 @@ def test_part_aliases():
               if d["attributes"]["Footprint"] == alias_uuid]
     check(len(owners) == 1, f"alias has {len(owners)} devices pointing at it")
     check(owners[0]["attributes"]["3D Model"] == "model-uuid", "alias device lost the model")
+    check(owners[0].get(cl.ALIAS_MARKER) is True, "alias device not marked")
     check(lib["devices"]["dev"]["attributes"]["Footprint"] == "fp",
           "aliasing repointed the original device")
 
@@ -492,10 +494,12 @@ def test_part_aliases():
     check(cl.pruneOrphans(lib, {"sym": "doc"}, docs) == 0,
           "pruning dropped the alias or its device")
 
-    # Re-downloading the same part must not pile up a second copy every time.
-    check(cl.addPartAliases(lib, docs) == 0, "alias added twice")
+    # Re-downloading the same part must not grow the library: aliases are rebuilt in place,
+    # not merged, so the count stays flat and the uuid is the same.
+    check(cl.addPartAliases(lib, docs) == 1, "rebuilt alias missing")
     check(len(lib["footprints"]) == 2, f"library grew: {sorted(lib['footprints'])}")
     check(len(lib["devices"]) == 2, f"devices grew: {sorted(lib['devices'])}")
+    check(alias_uuid in lib["footprints"], "rebuild changed the alias uuid")
 
     # Nothing to alias: no manufacturer part, and a footprint already named after the part.
     bare = {"devices": {"d": {"attributes": {"Footprint": "fp"}}},
@@ -512,6 +516,57 @@ def test_part_aliases():
     missing = {"devices": {"d": {"attributes": {"Manufacturer Part": "X", "Footprint": "gone"}}},
                "symbols": {}, "footprints": {}}
     check(cl.addPartAliases(missing, {}) == 0, "aliased a footprint with no document")
+
+
+def test_alias_runaway_cleanup():
+    import component_loader as cl
+
+    # The first version of the alias pass keyed the alias on the footprint uuid and
+    # re-aliased the alias device itself, so every download added a fresh copy. That
+    # left a library like this: one real device, several unmarked copies, and several
+    # part-named footprints, some renamed by uniquifyTitles.
+    real = {"display_title": "AO3401A_C15127",
+            "attributes": {"Manufacturer Part": "AO3401A", "Symbol": "sym", "Footprint": "fp"}}
+    lib = {
+        "devices": {
+            "dev-real": real,
+            "dev-copy1": {**{k: v for k, v in real.items()},
+                          "attributes": {**real["attributes"], "Footprint": "alias1"}},
+            "dev-copy2": {**{k: v for k, v in real.items()},
+                          "attributes": {**real["attributes"], "Footprint": "alias2"}},
+        },
+        "symbols": {"sym": {"display_title": "AO3401A"}},
+        "footprints": {
+            "fp": {"display_title": "SOT-23_L2.9-W1.3-P1.90-LS2.4-BR"},
+            "alias1": {"display_title": "AO3401A"},
+            "alias2": {"display_title": "AO3401A (bc11)"},
+        },
+    }
+    docs = {"fp": "DOC", "alias1": "DOC", "alias2": "DOC"}
+
+    cl.addPartAliases(lib, docs)
+
+    # Exactly one alias remains, keyed on the real device, and both stray copies are gone.
+    check(len(lib["footprints"]) == 2, f"stray footprints kept: {sorted(lib['footprints'])}")
+    check(len(lib["devices"]) == 2, f"stray devices kept: {sorted(lib['devices'])}")
+    check(cl.aliasUuid("dev-real", "AO3401A") in lib["footprints"],
+          "the surviving alias is not keyed on the real device")
+    check(all(e.get(cl.ALIAS_MARKER) for u, e in lib["footprints"].items() if u != "fp"),
+          "surviving alias not marked")
+
+    # And a second pass changes nothing.
+    cl.addPartAliases(lib, docs)
+    check(len(lib["footprints"]) == 2 and len(lib["devices"]) == 2,
+          "cleanup not stable across passes")
+
+    # A genuine part-named footprint that a real device references is not an alias and
+    # must survive.
+    kept = {"devices": {"d": {"display_title": "J5019",
+                              "attributes": {"Manufacturer Part": "J5019", "Footprint": "fp"}}},
+            "symbols": {}, "footprints": {"fp": {"display_title": "J5019"}}}
+    cl.addPartAliases(kept, {"fp": "doc"})
+    check(len(kept["footprints"]) == 1 and len(kept["devices"]) == 1,
+          "deleted a genuine part-named footprint")
 
 
 # --------------------------------------------------------------------------
@@ -723,6 +778,7 @@ SECTIONS = [
     ("easyeda_lib_loader, part queue", test_part_queue, ("requests", "pcbnew", "wx")),
     ("component_loader, library index", test_library_index, ("requests", "pcbnew")),
     ("component_loader, part aliases", test_part_aliases, ("requests", "pcbnew")),
+    ("component_loader, alias cleanup", test_alias_runaway_cleanup, ("requests", "pcbnew")),
     ("config_manager, library tables", test_library_tables, ("wx",)),
 ]
 

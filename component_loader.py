@@ -160,6 +160,15 @@ def uniquifyTitles(entries):
 # device references that footprint uuid, so an alias with no device would place without a body.
 # Devices are invisible in both choosers - eeschema enumerates "symbols" and pcbnew
 # "footprints" - so the extra entry adds no duplicate anywhere the user looks.
+#
+# Aliases are rebuilt from scratch on every write rather than merged, because merging is what
+# let them self-replicate: an alias device has the same part name as its source, so a second
+# pass aliased the alias, and every uniquify rename broke the title check and seeded another.
+# Each real device gets one deterministic alias (uuid = md5(deviceUuid, name)), marked
+# ALIAS_MARKER so a later pass can drop and rebuild it identically instead of growing.
+ALIAS_MARKER = "_jlc_alias"
+
+
 def aliasUuid(key, name):
     return hashlib.md5(f"{key}:{name}".encode("utf-8")).hexdigest()
 
@@ -167,12 +176,46 @@ def aliasUuid(key, name):
 def addPartAliases(libDeviceFile, footprintDocs):
     footprints = libDeviceFile["footprints"]
     devices = libDeviceFile["devices"]
-    aliases = {}
 
-    for deviceUuid, device in devices.items():
+    def partName(device):
         attributes = device.get("attributes") or {}
-        name = attributes.get("Manufacturer Part") or device.get("product_code") or ""
-        footprintUuid = attributes.get("Footprint")
+        return attributes.get("Manufacturer Part") or device.get("product_code") or ""
+
+    partNames = {partName(device) for device in devices.values()}
+    partNames.discard("")
+
+    def partNamed(title):
+        return any(title == name or title.startswith(name + " (") for name in partNames)
+
+    # Drop the aliases this pass created last time, marked so they are unambiguous.
+    for uuid in [u for u, entry in footprints.items() if entry.get(ALIAS_MARKER)]:
+        footprints.pop(uuid, None)
+        footprintDocs.pop(uuid, None)
+    for uuid in [u for u, device in devices.items() if device.get(ALIAS_MARKER)]:
+        devices.pop(uuid, None)
+
+    # Drop unmarked aliases left by the first version of this feature: a device copy has the
+    # same display_title as its source and points at a part-named footprint.
+    byTitle = {}
+    for uuid, device in devices.items():
+        byTitle.setdefault(entryTitle(device), []).append(uuid)
+    for uuid in [u for u, device in devices.items()
+                 if len(byTitle[entryTitle(device)]) > 1
+                 and partNamed(entryTitle(footprints.get((device.get("attributes") or {}).get("Footprint"), {})))]:
+        devices.pop(uuid, None)
+
+    # A part-named footprint no surviving device references only ever served a copy.
+    referenced = {(device.get("attributes") or {}).get("Footprint") for device in devices.values()}
+    for uuid in [u for u in footprints
+                 if u not in referenced and partNamed(entryTitle(footprints[u]))]:
+        footprints.pop(uuid, None)
+        footprintDocs.pop(uuid, None)
+
+    # One deterministic alias per real device.
+    added = 0
+    for deviceUuid, device in list(devices.items()):
+        name = partName(device)
+        footprintUuid = (device.get("attributes") or {}).get("Footprint")
 
         if not name or footprintUuid not in footprintDocs:
             continue
@@ -182,7 +225,7 @@ def addPartAliases(libDeviceFile, footprintDocs):
         if entry is None or entryTitle(entry) == name:
             continue
 
-        uuid = aliasUuid(footprintUuid, name)
+        uuid = aliasUuid(deviceUuid, name)
 
         if uuid in footprints:
             continue
@@ -191,17 +234,18 @@ def addPartAliases(libDeviceFile, footprintDocs):
         alias["uuid"] = uuid
         alias["display_title"] = name
         alias["title"] = name.lower()
+        alias[ALIAS_MARKER] = True
         footprints[uuid] = alias
         footprintDocs[uuid] = footprintDocs[footprintUuid]
 
         aliasDevice = copy.deepcopy(device)
-        aliasDevice["uuid"] = aliasUuid(deviceUuid, uuid)
+        aliasDevice["uuid"] = aliasUuid(deviceUuid, name + ":dev")
         aliasDevice["attributes"]["Footprint"] = uuid
-        aliases[aliasDevice["uuid"]] = aliasDevice
+        aliasDevice[ALIAS_MARKER] = True
+        devices[aliasDevice["uuid"]] = aliasDevice
+        added += 1
 
-    devices.update(aliases)
-
-    return len(aliases)
+    return added
 
 
 class ComponentLoader():
