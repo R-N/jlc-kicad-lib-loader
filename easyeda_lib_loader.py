@@ -151,7 +151,11 @@ def proRow(entry, source=SOURCE_PUBLIC):
 
     return (source,
             code,
-            entry.get("display_title") or entry.get("title", ""),
+            # The LCSC Part Name is the human-readable description ("100k ohm ±1%
+            # 62.5mW"); display_title is the part number, which already has its own
+            # MPN column. Showing both makes the two columns distinct instead of
+            # repeating the code twice.
+            attributes.get("LCSC Part Name") or entry.get("display_title") or entry.get("title", ""),
             attributes.get("Manufacturer Part", ""),
             # The footprint document title is unreadable ("SOT-223-3_L6.5-W3.4-P2.30-LS7.0-BR");
             # the supplier's package name is what a person recognises.
@@ -159,7 +163,8 @@ def proRow(entry, source=SOURCE_PUBLIC):
             or ((entry.get("footprint") or {}).get("display_title", "")),
             (attributes.get("JLCPCB Part Class") or "").replace(" Part", ""),
             "Device",
-            contributorOf(entry))
+            contributorOf(entry),
+            searchableText(attributes))
 
 def stdRow(entry):
     """A results row for an EasyEDA Std component.
@@ -179,7 +184,14 @@ def stdRow(entry):
             params.get("package", ""),
             "",
             kind,
-            contributorOf(entry))
+            contributorOf(entry),
+            searchableText(params))
+
+def searchableText(attributes):
+    """The parameter key/value pairs flattened into one string, so the filter box
+    matches parameter values ("100k ohm", "±1%") and not just the grid columns."""
+    return " ".join(f"{key} {value}" for key, value in (attributes or {}).items()
+                    if isinstance(value, str) and value)
 
 def rowMatches(row, query):
     """True when every whitespace-separated term appears somewhere in the row."""
@@ -678,7 +690,8 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
             for row in rows:
                 item = tree.AppendItem(tree.GetRootItem(), row[0])
 
-                for column, value in enumerate(row[1:], start=1):
+                # The last cell is the searchable parameter text, not a column.
+                for column, value in enumerate(row[1:len(RESULT_COLUMNS)], start=1):
                     tree.SetItemText(item, column, value)
 
             # While filtering, the paging label counts what survived the filter;

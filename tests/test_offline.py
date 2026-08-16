@@ -668,8 +668,10 @@ PRO_DEVICE = {
     "display_title": "AMS1117-3.3_C6186",
     "footprint": {"display_title": "SOT-223-3_L6.5-W3.4-P2.30-LS7.0-BR"},
     "creator": {"nickname": "LCSC"},
-    "attributes": {"Manufacturer Part": "AMS1117-3.3", "Supplier Footprint": "SOT-223",
-                   "JLCPCB Part Class": "Basic Part", "Supplier Part": "C6186"},
+    "attributes": {"LCSC Part Name": "1A low dropout 3.3V regulator",
+                   "Manufacturer Part": "AMS1117-3.3", "Supplier Footprint": "SOT-223",
+                   "JLCPCB Part Class": "Basic Part", "Supplier Part": "C6186",
+                   "Dropout Voltage": "1.1V"},
 }
 
 STD_FOOTPRINT_ENTRY = {
@@ -684,9 +686,12 @@ def test_result_rows():
     ell = loaderModule()
 
     row = ell.proRow(PRO_DEVICE, ell.SOURCE_SYSTEM)
-    check(len(row) == len(ell.RESULT_COLUMNS), "row width does not match the columns")
+    check(len(row) == len(ell.RESULT_COLUMNS) + 1,
+          "row is the columns plus one hidden searchable cell")
     check(row[0] == "System", "source not taken from the facet")
     check(row[1] == "C6186", "code column")
+    # The Name column is the description, not a second copy of the part number.
+    check(row[2] == "1A low dropout 3.3V regulator", f"name column shows {row[2]!r}")
     check(row[3] == "AMS1117-3.3", "MPN column")
     # The document title is unreadable; the supplier package is what a person knows.
     check(row[4] == "SOT-223", f"package column shows {row[4]!r}")
@@ -716,6 +721,8 @@ def test_filter_and_sort():
 
     rows = [ell.proRow(PRO_DEVICE, ell.SOURCE_SYSTEM), ell.stdRow(STD_FOOTPRINT_ENTRY)]
 
+    # A parameter value in no grid column must still match via the hidden search cell.
+    check(ell.rowMatches(rows[0], "1.1V"), "parameter value not searched")
     # Every term must match somewhere in the row, in any column, either case.
     check(ell.rowMatches(rows[0], ""), "an empty filter must keep everything")
     check(ell.rowMatches(rows[0], "sot-223"), "package not searched")
