@@ -1,4 +1,5 @@
 import copy
+import hashlib
 import os
 import json
 import traceback
@@ -146,6 +147,61 @@ def uniquifyTitles(entries):
                 " document per name.")
         entries[uuid]["display_title"] = unique
         seen[unique] = uuid
+
+
+# KiCad names a Pro footprint after its package ("SOT-23_L2.9-W1.3-P1.90-LS2.4-BR"), and the
+# importer sets no description or keywords, so the chooser can only match that string. Nobody
+# searches for a package they did not choose: they search for the part number. Give every
+# device's footprint a second entry named after the part, pointing at a copy of the same
+# document. The package entry keeps its name so boards already placing it still resolve, and
+# one shared package document is never labelled with whichever part happened to arrive first.
+#
+# The copy needs a device of its own: the importer takes a footprint's 3D model from whichever
+# device references that footprint uuid, so an alias with no device would place without a body.
+# Devices are invisible in both choosers - eeschema enumerates "symbols" and pcbnew
+# "footprints" - so the extra entry adds no duplicate anywhere the user looks.
+def aliasUuid(key, name):
+    return hashlib.md5(f"{key}:{name}".encode("utf-8")).hexdigest()
+
+
+def addPartAliases(libDeviceFile, footprintDocs):
+    footprints = libDeviceFile["footprints"]
+    devices = libDeviceFile["devices"]
+    aliases = {}
+
+    for deviceUuid, device in devices.items():
+        attributes = device.get("attributes") or {}
+        name = attributes.get("Manufacturer Part") or device.get("product_code") or ""
+        footprintUuid = attributes.get("Footprint")
+
+        if not name or footprintUuid not in footprintDocs:
+            continue
+
+        entry = footprints.get(footprintUuid)
+
+        if entry is None or entryTitle(entry) == name:
+            continue
+
+        uuid = aliasUuid(footprintUuid, name)
+
+        if uuid in footprints:
+            continue
+
+        alias = copy.deepcopy(entry)
+        alias["uuid"] = uuid
+        alias["display_title"] = name
+        alias["title"] = name.lower()
+        footprints[uuid] = alias
+        footprintDocs[uuid] = footprintDocs[footprintUuid]
+
+        aliasDevice = copy.deepcopy(device)
+        aliasDevice["uuid"] = aliasUuid(deviceUuid, uuid)
+        aliasDevice["attributes"]["Footprint"] = uuid
+        aliases[aliasDevice["uuid"]] = aliasDevice
+
+    devices.update(aliases)
+
+    return len(aliases)
 
 
 class ComponentLoader():
@@ -350,6 +406,7 @@ class ComponentLoader():
             warning(f"Failed to merge device.json data, overwriting: {e}")
 
         pruneOrphans(merged_data, symbol_data_str, footprint_data_str)
+        addPartAliases(merged_data, footprint_data_str)
         uniquifyTitles(merged_data["footprints"])
 
         with zipfile.ZipFile(zip_filename, "w", compression=zipfile.ZIP_DEFLATED) as zf:

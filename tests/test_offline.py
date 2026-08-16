@@ -446,6 +446,74 @@ def test_library_index():
     check(cl.entryTitle(entries["c-uuid"]) == "J5019 EDIT", "renamed an entry that was unique")
 
 
+def test_part_aliases():
+    import component_loader as cl
+
+    # A Pro device: the footprint document is named after the package, which is not what
+    # anyone types into the footprint chooser.
+    lib = {
+        "devices": {
+            "dev": {"display_title": "AO3401A_C15127", "product_code": "C15127",
+                    "attributes": {"Manufacturer Part": "AO3401A",
+                                   "Symbol": "sym", "Footprint": "fp",
+                                   "3D Model": "model-uuid"}},
+        },
+        "symbols": {"sym": {"display_title": "AO3401A"}},
+        "footprints": {"fp": {"display_title": "SOT-23_L2.9-W1.3-P1.90-LS2.4-BR",
+                              "model_3d": {"uri": "model-uuid"}}},
+    }
+    docs = {"fp": "FOOTPRINT DOCUMENT"}
+
+    check(cl.addPartAliases(lib, docs) == 1, "no alias added for a device with an MPN")
+
+    titles = sorted(cl.entryTitle(e) for e in lib["footprints"].values())
+    check(titles == ["AO3401A", "SOT-23_L2.9-W1.3-P1.90-LS2.4-BR"], f"titles are {titles}")
+
+    alias_uuid = cl.aliasUuid("fp", "AO3401A")
+    check(alias_uuid in lib["footprints"], "alias not keyed by its own uuid")
+    check(docs[alias_uuid] == docs["fp"], "alias must carry the same document")
+    # The package entry is what placed boards reference; renaming it would break them.
+    check(cl.entryTitle(lib["footprints"]["fp"]) == "SOT-23_L2.9-W1.3-P1.90-LS2.4-BR",
+          "the package entry must keep its name")
+    # The alias is a real entry, so it needs everything the importer reads off it.
+    check(lib["footprints"][alias_uuid]["model_3d"]["uri"] == "model-uuid",
+          "alias lost the 3D model reference")
+
+    # The importer reads a footprint's 3D model off whichever device points at that uuid,
+    # so the alias needs its own device or it places with no body.
+    owners = [d for d in lib["devices"].values()
+              if d["attributes"]["Footprint"] == alias_uuid]
+    check(len(owners) == 1, f"alias has {len(owners)} devices pointing at it")
+    check(owners[0]["attributes"]["3D Model"] == "model-uuid", "alias device lost the model")
+    check(lib["devices"]["dev"]["attributes"]["Footprint"] == "fp",
+          "aliasing repointed the original device")
+
+    # Both entries must survive the prune that runs on every write.
+    check(cl.pruneOrphans(lib, {"sym": "doc"}, docs) == 0,
+          "pruning dropped the alias or its device")
+
+    # Re-downloading the same part must not pile up a second copy every time.
+    check(cl.addPartAliases(lib, docs) == 0, "alias added twice")
+    check(len(lib["footprints"]) == 2, f"library grew: {sorted(lib['footprints'])}")
+    check(len(lib["devices"]) == 2, f"devices grew: {sorted(lib['devices'])}")
+
+    # Nothing to alias: no manufacturer part, and a footprint already named after the part.
+    bare = {"devices": {"d": {"attributes": {"Footprint": "fp"}}},
+            "symbols": {}, "footprints": {"fp": {"display_title": "SOT-23"}}}
+    check(cl.addPartAliases(bare, {"fp": "doc"}) == 0, "aliased a device with no part number")
+
+    same = {"devices": {"d": {"attributes": {"Manufacturer Part": "J5019", "Footprint": "fp"}}},
+            "symbols": {}, "footprints": {"fp": {"display_title": "J5019"}}}
+    check(cl.addPartAliases(same, {"fp": "doc"}) == 0,
+          "aliased a footprint that already carries the part name")
+
+    # A device whose document never arrived must not gain an entry pointing at nothing:
+    # one unloadable entry is what hides a whole library from the chooser.
+    missing = {"devices": {"d": {"attributes": {"Manufacturer Part": "X", "Footprint": "gone"}}},
+               "symbols": {}, "footprints": {}}
+    check(cl.addPartAliases(missing, {}) == 0, "aliased a footprint with no document")
+
+
 # --------------------------------------------------------------------------
 # config_manager: library table rows
 # --------------------------------------------------------------------------
@@ -654,6 +722,7 @@ SECTIONS = [
     ("easyeda_lib_loader, filter and sort", test_filter_and_sort, ("requests", "pcbnew", "wx")),
     ("easyeda_lib_loader, part queue", test_part_queue, ("requests", "pcbnew", "wx")),
     ("component_loader, library index", test_library_index, ("requests", "pcbnew")),
+    ("component_loader, part aliases", test_part_aliases, ("requests", "pcbnew")),
     ("config_manager, library tables", test_library_tables, ("wx",)),
 ]
 

@@ -155,10 +155,13 @@ EasyEDA Std" link for the interactive viewer.
 
 **KiCad does not name parts after the part number.** A symbol is named after its symbol
 document and a footprint after its footprint document, so `AO3401A` (LCSC `C15127`) is placed
-from the symbol `AO3401A` but its footprint is called `SOT-23_L2.9-W1.3-P1.90-LS2.4-BR` —
-searching the footprint chooser for `AO3401A` finds nothing, because that one SOT-23 document
-is shared by hundreds of parts. The first two rows of the preview's parameter list, **Symbol in
-KiCad** and **Footprint in KiCad**, are exactly the names to search for.
+from the symbol `AO3401A` but its footprint document is called `SOT-23_L2.9-W1.3-P1.90-LS2.4-BR`,
+because that one SOT-23 document is shared by hundreds of parts. So the plugin files each Pro
+footprint **twice**: once under its package name and once under the part's manufacturer part
+number, both pointing at the same document. You can find the footprint by searching either
+`AO3401A` or `SOT-23` in the footprint chooser; the package-named entry stays so a board that
+already placed it keeps resolving. The first two rows of the preview's parameter list,
+**Symbol in KiCad** and **Footprint in KiCad**, are exactly the names to search for.
 
 ## Downloading
 
