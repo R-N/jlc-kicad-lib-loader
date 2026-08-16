@@ -446,6 +446,28 @@ def test_library_index():
     check(cl.entryTitle(entries["c-uuid"]) == "J5019 EDIT", "renamed an entry that was unique")
 
 
+def test_pro_result():
+    import component_loader as cl
+
+    check(cl.proResult({"success": True, "result": {"uuid": "x"}}) == {"uuid": "x"},
+          "a good response must return its result")
+
+    # EasyEDA Pro signals failure with HTTP 200 and success=false; the message is the
+    # only clue, so it must surface instead of a bare KeyError('result').
+    try:
+        cl.proResult({"success": False, "code": 404, "message": "Component not found"})
+        check(False, "a failed response must raise")
+    except Exception as e:
+        check("Component not found" in str(e) and "404" in str(e),
+              f"error hides the API message: {e}")
+
+    try:
+        cl.proResult({"success": True})
+        check(False, "a response with no result must raise")
+    except Exception:
+        pass
+
+
 def test_part_aliases():
     import component_loader as cl
 
@@ -787,6 +809,7 @@ SECTIONS = [
     ("component_loader, part aliases", test_part_aliases, ("requests", "pcbnew")),
     ("component_loader, alias cleanup", test_alias_runaway_cleanup, ("requests", "pcbnew")),
     ("config_manager, library tables", test_library_tables, ("wx",)),
+    ("component_loader, pro result", test_pro_result, ("requests", "pcbnew")),
 ]
 
 

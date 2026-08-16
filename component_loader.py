@@ -55,6 +55,14 @@ def splitSources(components):
 
     return proComponents, stdComponents
 
+# EasyEDA Pro returns HTTP 200 with `{"success": false, "code": …, "message": …}` on
+# failure, so `data["result"]` KeyErrors instead of explaining itself. Raise the API's
+# own message instead of a bare `'result'`.
+def proResult(data):
+    if not data.get("success") or not data.get("result"):
+        raise Exception(f"{data.get('message') or data} (code {data.get('code')})")
+    return data["result"]
+
 # Field separators of the EasyEDA Standard shape format must not appear inside values.
 def sanitizeStdValue(value):
     return str(value).replace("~", " ").replace("`", "'").replace("#@$", " ")
@@ -268,11 +276,14 @@ class ComponentLoader():
 
         try:
             modelTasks = {}
+            fetchFailures = 0
 
             if proComponents:
-                libDeviceFile, fetched_3dmodels, proSymbols, proFootprints = self.downloadSymFp(proComponents)
+                libDeviceFile, fetched_3dmodels, proSymbols, proFootprints, proFailed = \
+                    self.downloadSymFp(proComponents)
                 summary["symbols"] += proSymbols
                 summary["footprints"] += proFootprints
+                fetchFailures += proFailed
                 modelTasks.update(self.collectProModels(libDeviceFile, fetched_3dmodels))
 
             if stdComponents:
@@ -284,7 +295,7 @@ class ComponentLoader():
             self.downloadModels(modelTasks)
             summary["models"] = self.statDownloaded + self.statExisting
             summary["skipped"] = self.statSkipped
-            summary["failed"] = self.statFailed
+            summary["failed"] = self.statFailed + fetchFailures
             self.progress(100, 100)
             self.warnRescanNeeded()
         except Exception as e:
@@ -340,12 +351,21 @@ class ComponentLoader():
 
             debug("device info: " + json.dumps(dev_info.json(), indent=4))
 
-            device = dev_info.json()["result"]
+            device = proResult(dev_info.json())
             fetched_devices[device["uuid"]] = device
 
+        failed = 0
+
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            for dev_uuid in direct_uuids:
-                executor.submit(fetch_device_info, dev_uuid)
+            futures = {executor.submit(fetch_device_info, dev_uuid): dev_uuid
+                       for dev_uuid in direct_uuids}
+
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    future.result()
+                except Exception as e:
+                    failed += 1
+                    error(f"Failed to fetch device {futures[future]}: {e}")
 
         # Collect symbol/footprint/3D model UUIDs to fetch
         fetched_symbols = {}
@@ -372,7 +392,7 @@ class ComponentLoader():
             url = f"https://pro.easyeda.com/api/v2/components/{uuid}"
             r = self.session.get(url)
             r.raise_for_status()
-            return r.json()["result"]
+            return proResult(r.json())
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
             futures = {executor.submit(fetch_component, uuid): uuid for uuid in all_uuids}
@@ -383,7 +403,8 @@ class ComponentLoader():
 
                     uuid_to_obj_map[compData["uuid"]][compData["uuid"]] = compData
                 except Exception as e:
-                    error(f"Failed to fetch component for uuid {futures[future]}: {e}")
+                    failed += 1
+                    error(f"Failed to fetch component {futures[future]}: {e}")
 
         # Set symbol/footprint type fields
         for device in fetched_devices.values():
@@ -468,7 +489,7 @@ class ComponentLoader():
         info( "*****************************" )
         info(f"Downloaded {len(fetched_devices)} devices, {written_symbols} symbols, "
              f"{written_footprints} footprints and added to library: {zip_filename}")
-        return libDeviceFile, fetched_3dmodels, written_symbols, written_footprints
+        return libDeviceFile, fetched_3dmodels, written_symbols, written_footprints, failed
 
     # Collect 3D model download tasks for Pro devices: { model uuid: (target file, fit X mm, fit Y mm) }
     def collectProModels(self, libDeviceFile, fetched_3dmodels):

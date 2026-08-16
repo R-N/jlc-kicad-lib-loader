@@ -817,8 +817,8 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
                     dev_info = session.get(PRO_DEVICE_URL.format(uuid=deviceUuid))
                     dev_info.raise_for_status()
                     debug("device info: " + json.dumps(dev_info.json(), indent=4))
-                    device = dev_info.json()["result"]
-                    attributes = dict(device['attributes'])
+                    device = proResult(dev_info.json())
+                    attributes = dict(device["attributes"])
                     preview_title = device.get('display_title') or device.get('title', '')
                     code = attributes.get('Supplier Part', '')
 
