@@ -105,9 +105,11 @@ first = found[0]
 print("first row:", first)
 assert first[1].startswith("C"), f"no part code in the code column: {first[1]}"
 # The footprint document is titled SOT-223-3_L6.5-W3.4-P2.30-LS7.0-BR; the package
-# a person recognises is SOT-223.
-assert first[4] and "_L" not in first[4], f"package column is a document title: {first[4]}"
-assert first[3], "no MPN"
+# a person recognises is SOT-223. Column 7 is Package, column 6 the document title.
+assert first[7] and "_L" not in first[7], f"package column is a document title: {first[7]}"
+assert first[6], "no footprint name, which is what pcbnew will call it"
+assert first[5], "no symbol name, which is what eeschema will call it"
+assert first[3], "no value"
 
 # --- the filter narrows the page without another round trip ---------------------
 dlg.m_textCtrlFilter.SetValue("5.0")
@@ -160,7 +162,7 @@ sources = sorted({row[0] for row in found})
 print(f"All Sources: {len(found)} rows | {sources} | {dlg.m_searchStatus.GetLabel()}")
 assert "Std" in sources, "All Sources still queries only the Pro API"
 assert {"System", "Public"} & set(sources), "All Sources lost the Pro rows"
-kinds = sorted({row[6] for row in found})
+kinds = sorted({row[9] for row in found})
 print("types:", kinds)
 assert "Symbol" in kinds or "Footprint" in kinds, "Std rows do not say what they are"
 

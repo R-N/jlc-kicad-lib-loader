@@ -19,7 +19,7 @@ import wx.adv
 class EasyEdaLibLoaderDialog ( wx.Dialog ):
 
 	def __init__( self, parent ):
-		wx.Dialog.__init__ ( self, parent, id = wx.ID_ANY, title = u"JLCPCB/LCSC Library Loader. Unofficial, use at your own risk.", pos = wx.DefaultPosition, size = wx.Size( 1180,820 ), style = wx.DEFAULT_DIALOG_STYLE|wx.RESIZE_BORDER )
+		wx.Dialog.__init__ ( self, parent, id = wx.ID_ANY, title = u"JLCPCB/LCSC Library Loader. Unofficial, use at your own risk.", pos = wx.DefaultPosition, size = wx.Size( 1180,820 ), style = wx.DEFAULT_DIALOG_STYLE|wx.MAXIMIZE_BOX|wx.RESIZE_BORDER )
 
 		self.SetSizeHints( wx.Size( 900,640 ), wx.DefaultSize )
 
@@ -44,7 +44,7 @@ class EasyEdaLibLoaderDialog ( wx.Dialog ):
 		self.m_searchBtn.SetDefault()
 		bSizerSearchBar.Add( self.m_searchBtn, 0, wx.ALIGN_CENTER_VERTICAL|wx.ALL, 5 )
 
-		self.m_filterLabel = wx.StaticText( self, wx.ID_ANY, u"Filter:", wx.DefaultPosition, wx.DefaultSize, 0 )
+		self.m_filterLabel = wx.StaticText( self, wx.ID_ANY, u"Narrow these results:", wx.DefaultPosition, wx.DefaultSize, 0 )
 		self.m_filterLabel.Wrap( -1 )
 
 		bSizerSearchBar.Add( self.m_filterLabel, 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 10 )
@@ -53,6 +53,18 @@ class EasyEdaLibLoaderDialog ( wx.Dialog ):
 		self.m_textCtrlFilter.SetToolTip( u"Narrows the results below across every column" )
 
 		bSizerSearchBar.Add( self.m_textCtrlFilter, 2, wx.ALIGN_CENTER_VERTICAL|wx.ALL, 5 )
+
+		self.m_pageSizeLabel = wx.StaticText( self, wx.ID_ANY, u"Per page:", wx.DefaultPosition, wx.DefaultSize, 0 )
+		self.m_pageSizeLabel.Wrap( -1 )
+
+		bSizerSearchBar.Add( self.m_pageSizeLabel, 0, wx.ALIGN_CENTER_VERTICAL|wx.LEFT, 5 )
+
+		m_pageSizeChoiceChoices = [ u"10", u"25", u"50", u"100", u"200" ]
+		self.m_pageSizeChoice = wx.Choice( self, wx.ID_ANY, wx.DefaultPosition, wx.DefaultSize, m_pageSizeChoiceChoices, 0 )
+		self.m_pageSizeChoice.SetSelection( 2 )
+		self.m_pageSizeChoice.SetToolTip( u"How many results each search asks for" )
+
+		bSizerSearchBar.Add( self.m_pageSizeChoice, 0, wx.ALIGN_CENTER_VERTICAL|wx.RIGHT|wx.TOP|wx.BOTTOM, 5 )
 
 
 		bSizerMain.Add( bSizerSearchBar, 0, wx.EXPAND|wx.LEFT|wx.RIGHT, 5 )
@@ -148,6 +160,74 @@ class EasyEdaLibLoaderDialog ( wx.Dialog ):
 
 		bSizerResults.Add( bSizerQueue, 0, wx.EXPAND|wx.LEFT|wx.RIGHT, 5 )
 
+		bSizerLibrary = wx.BoxSizer( wx.HORIZONTAL )
+
+		self.m_staticText2 = wx.StaticText( self.m_resultsPanel, wx.ID_ANY, u"Library:", wx.DefaultPosition, wx.DefaultSize, 0 )
+		self.m_staticText2.Wrap( -1 )
+
+		bSizerLibrary.Add( self.m_staticText2, 0, wx.ALIGN_CENTER_VERTICAL|wx.ALL, 5 )
+
+		self.m_textCtrlOutLibName = wx.TextCtrl( self.m_resultsPanel, wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.DefaultSize, 0 )
+		self.m_textCtrlOutLibName.SetToolTip( u"Library name inside the project, or an absolute path" )
+
+		bSizerLibrary.Add( self.m_textCtrlOutLibName, 1, wx.ALIGN_CENTER_VERTICAL|wx.BOTTOM|wx.EXPAND|wx.TOP, 5 )
+
+		self.m_browseBtn = wx.Button( self.m_resultsPanel, wx.ID_ANY, u"Browse…", wx.DefaultPosition, wx.DefaultSize, 0 )
+		self.m_browseBtn.SetToolTip( u"Choose the folder the library is written to" )
+
+		bSizerLibrary.Add( self.m_browseBtn, 0, wx.ALIGN_CENTER_VERTICAL|wx.ALL, 5 )
+
+		self.m_actionBtn = wx.Button( self.m_resultsPanel, wx.ID_ANY, u"Download parts", wx.DefaultPosition, wx.DefaultSize, 0 )
+		self.m_actionBtn.Enable( False )
+		self.m_actionBtn.SetToolTip( u"Download everything in the queue" )
+
+		bSizerLibrary.Add( self.m_actionBtn, 0, wx.ALIGN_CENTER_VERTICAL|wx.BOTTOM|wx.LEFT|wx.TOP, 10 )
+
+
+		bSizerResults.Add( bSizerLibrary, 0, wx.EXPAND|wx.LEFT|wx.RIGHT, 5 )
+
+		bSizerProgress = wx.BoxSizer( wx.HORIZONTAL )
+
+		self.m_progress = wx.Gauge( self.m_resultsPanel, wx.ID_ANY, 100, wx.DefaultPosition, wx.DefaultSize, wx.GA_HORIZONTAL )
+		self.m_progress.SetValue( 0 )
+		self.m_progress.SetMinSize( wx.Size( -1,18 ) )
+
+		bSizerProgress.Add( self.m_progress, 1, wx.ALIGN_CENTER_VERTICAL|wx.ALL, 5 )
+
+		self.m_resultStatus = wx.StaticText( self.m_resultsPanel, wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.DefaultSize, 0 )
+		self.m_resultStatus.Wrap( -1 )
+
+		bSizerProgress.Add( self.m_resultStatus, 2, wx.ALIGN_CENTER_VERTICAL|wx.ALL, 5 )
+
+		self.m_debug = wx.CheckBox( self.m_resultsPanel, wx.ID_ANY, u"Debug", wx.DefaultPosition, wx.DefaultSize, 0 )
+		self.m_debug.SetToolTip( u"Log every request and document" )
+
+		bSizerProgress.Add( self.m_debug, 0, wx.ALIGN_CENTER_VERTICAL|wx.ALL, 5 )
+
+		self.m_closeButton = wx.Button( self.m_resultsPanel, wx.ID_CANCEL, u"Close dialog", wx.DefaultPosition, wx.DefaultSize, 0 )
+		bSizerProgress.Add( self.m_closeButton, 0, wx.ALIGN_CENTER_VERTICAL|wx.ALL, 5 )
+
+
+		bSizerResults.Add( bSizerProgress, 0, wx.EXPAND|wx.LEFT|wx.RIGHT, 5 )
+
+		self.m_logPane = wx.CollapsiblePane( self.m_resultsPanel, wx.ID_ANY, u"Details", wx.DefaultPosition, wx.DefaultSize, wx.CP_DEFAULT_STYLE )
+		self.m_logPane.Collapse( True )
+
+		self.m_logPane.SetToolTip( u"Full log of the last run" )
+
+		bSizerLogPane = wx.BoxSizer( wx.VERTICAL )
+
+		self.m_log = wx.TextCtrl( self.m_logPane.GetPane(), wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.DefaultSize, wx.TE_BESTWRAP|wx.TE_MULTILINE|wx.TE_READONLY )
+		self.m_log.SetMinSize( wx.Size( 400,150 ) )
+
+		bSizerLogPane.Add( self.m_log, 1, wx.EXPAND|wx.ALL, 2 )
+
+
+		self.m_logPane.GetPane().SetSizer( bSizerLogPane )
+		self.m_logPane.GetPane().Layout()
+		bSizerLogPane.Fit( self.m_logPane.GetPane() )
+		bSizerResults.Add( self.m_logPane, 0, wx.EXPAND|wx.LEFT|wx.RIGHT, 5 )
+
 
 		self.m_resultsPanel.SetSizer( bSizerResults )
 		self.m_resultsPanel.Layout()
@@ -223,74 +303,6 @@ class EasyEdaLibLoaderDialog ( wx.Dialog ):
 		bSizerInspector.Fit( self.m_inspectorPanel )
 		self.m_splitterMain.SplitVertically( self.m_resultsPanel, self.m_inspectorPanel, 700 )
 		bSizerMain.Add( self.m_splitterMain, 1, wx.EXPAND, 5 )
-
-		bSizerLibrary = wx.BoxSizer( wx.HORIZONTAL )
-
-		self.m_staticText2 = wx.StaticText( self, wx.ID_ANY, u"Library:", wx.DefaultPosition, wx.DefaultSize, 0 )
-		self.m_staticText2.Wrap( -1 )
-
-		bSizerLibrary.Add( self.m_staticText2, 0, wx.ALIGN_CENTER_VERTICAL|wx.ALL, 5 )
-
-		self.m_textCtrlOutLibName = wx.TextCtrl( self, wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.DefaultSize, 0 )
-		self.m_textCtrlOutLibName.SetToolTip( u"Library name inside the project, or an absolute path" )
-
-		bSizerLibrary.Add( self.m_textCtrlOutLibName, 1, wx.ALIGN_CENTER_VERTICAL|wx.BOTTOM|wx.EXPAND|wx.TOP, 5 )
-
-		self.m_browseBtn = wx.Button( self, wx.ID_ANY, u"Browse…", wx.DefaultPosition, wx.DefaultSize, 0 )
-		self.m_browseBtn.SetToolTip( u"Choose the folder the library is written to" )
-
-		bSizerLibrary.Add( self.m_browseBtn, 0, wx.ALIGN_CENTER_VERTICAL|wx.ALL, 5 )
-
-		self.m_actionBtn = wx.Button( self, wx.ID_ANY, u"Download parts", wx.DefaultPosition, wx.DefaultSize, 0 )
-		self.m_actionBtn.Enable( False )
-		self.m_actionBtn.SetToolTip( u"Download everything in the queue" )
-
-		bSizerLibrary.Add( self.m_actionBtn, 0, wx.ALIGN_CENTER_VERTICAL|wx.BOTTOM|wx.LEFT|wx.TOP, 10 )
-
-
-		bSizerMain.Add( bSizerLibrary, 0, wx.EXPAND|wx.LEFT|wx.RIGHT, 5 )
-
-		bSizerProgress = wx.BoxSizer( wx.HORIZONTAL )
-
-		self.m_progress = wx.Gauge( self, wx.ID_ANY, 100, wx.DefaultPosition, wx.DefaultSize, wx.GA_HORIZONTAL )
-		self.m_progress.SetValue( 0 )
-		self.m_progress.SetMinSize( wx.Size( -1,18 ) )
-
-		bSizerProgress.Add( self.m_progress, 1, wx.ALIGN_CENTER_VERTICAL|wx.ALL, 5 )
-
-		self.m_resultStatus = wx.StaticText( self, wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.DefaultSize, 0 )
-		self.m_resultStatus.Wrap( -1 )
-
-		bSizerProgress.Add( self.m_resultStatus, 2, wx.ALIGN_CENTER_VERTICAL|wx.ALL, 5 )
-
-		self.m_debug = wx.CheckBox( self, wx.ID_ANY, u"Debug", wx.DefaultPosition, wx.DefaultSize, 0 )
-		self.m_debug.SetToolTip( u"Log every request and document" )
-
-		bSizerProgress.Add( self.m_debug, 0, wx.ALIGN_CENTER_VERTICAL|wx.ALL, 5 )
-
-		self.m_closeButton = wx.Button( self, wx.ID_CANCEL, u"Close dialog", wx.DefaultPosition, wx.DefaultSize, 0 )
-		bSizerProgress.Add( self.m_closeButton, 0, wx.ALIGN_CENTER_VERTICAL|wx.ALL, 5 )
-
-
-		bSizerMain.Add( bSizerProgress, 0, wx.EXPAND|wx.LEFT|wx.RIGHT, 5 )
-
-		self.m_logPane = wx.CollapsiblePane( self, wx.ID_ANY, u"Details", wx.DefaultPosition, wx.DefaultSize, wx.CP_DEFAULT_STYLE )
-		self.m_logPane.Collapse( True )
-
-		self.m_logPane.SetToolTip( u"Full log of the last run" )
-
-		bSizerLogPane = wx.BoxSizer( wx.VERTICAL )
-
-		self.m_log = wx.TextCtrl( self.m_logPane.GetPane(), wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.DefaultSize, wx.TE_BESTWRAP|wx.TE_MULTILINE|wx.TE_READONLY )
-		self.m_log.SetMinSize( wx.Size( 400,150 ) )
-
-		bSizerLogPane.Add( self.m_log, 1, wx.EXPAND|wx.ALL, 2 )
-
-
-		self.m_logPane.GetPane().SetSizer( bSizerLogPane )
-		self.m_logPane.GetPane().Layout()
-		bSizerLogPane.Fit( self.m_logPane.GetPane() )
-		bSizerMain.Add( self.m_logPane, 0, wx.EXPAND|wx.LEFT|wx.RIGHT, 5 )
 
 
 		self.SetSizer( bSizerMain )

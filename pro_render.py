@@ -79,6 +79,24 @@ def _escape(text):
             .replace('"', "&quot;"))
 
 
+def _mils(value):
+    """Mils as a mm string, for the preview's pad tooltips."""
+    return f"{_num(value) * 0.0254:.3f} mm"
+
+
+def _padSize(padShape):
+    """A pad's size as "w x h mm", from the shape record footprints store it in."""
+    if not padShape or not isinstance(padShape, (list, tuple)) or len(padShape) < 3:
+        return ""
+
+    w, h = abs(_num(_at(padShape, 1))), abs(_num(_at(padShape, 2)))
+
+    if not w and not h:
+        return ""
+
+    return f"{w * 0.0254:.3f} x {h * 0.0254:.3f} mm"
+
+
 class _Drawing:
     """Collects SVG elements and the bounding box they occupy.
 
@@ -104,26 +122,71 @@ class _Drawing:
             f'<line x1="{x1:.3f}" y1="{-y1:.3f}" x2="{x2:.3f}" y2="{-y2:.3f}"'
             f' stroke="{color}" stroke-width="{max(width, 0.4):.3f}"/>')
 
+    def begin(self, **attrs):
+        """Open a group carrying the metadata the preview page hovers and toggles on.
+
+        Keyword underscores become dashes, so `data_layer=3` emits `data-layer="3"`.
+        Empty values are dropped rather than emitted as empty attributes.
+        """
+        written = "".join(f' {key.replace("_", "-")}="{_escape(value)}"'
+                          for key, value in attrs.items() if value not in (None, ""))
+        self.elements.append(f"<g{written}>")
+
+    def end(self):
+        self.elements.append("</g>")
+
+    def wrap(self, mark, **attrs):
+        """Group everything appended since `mark`, if anything was.
+
+        Grouping after the fact rather than with begin/end because the footprint
+        loop's branches bail out with `continue` on documents that carry nothing
+        drawable; an opened group would then never be closed.
+        """
+        if len(self.elements) == mark:
+            return
+
+        written = "".join(f' {key.replace("_", "-")}="{_escape(value)}"'
+                          for key, value in attrs.items() if value not in (None, ""))
+        self.elements.insert(mark, f"<g{written}>")
+        self.elements.append("</g>")
+
+    def hit(self, x1, y1, x2, y2, width):
+        """An invisible but hoverable stroke over a thin feature.
+
+        A 0.6-wide pin line is nearly impossible to point at, and `stroke="none"`
+        is not hit-tested at all, so this paints a fully transparent fat stroke and
+        asks for hit testing on it explicitly.
+        """
+        self.elements.append(
+            f'<line x1="{x1:.3f}" y1="{-y1:.3f}" x2="{x2:.3f}" y2="{-y2:.3f}"'
+            f' stroke="#000000" stroke-opacity="0" stroke-width="{width:.3f}"'
+            ' pointer-events="stroke"/>')
+
     def circle(self, cx, cy, r, color, width=0.0, fill="none"):
         self.grow(cx, -cy, r)
         stroke = f' stroke="{color}" stroke-width="{max(width, 0.4):.3f}"' if width or fill == "none" else ""
         self.elements.append(
             f'<circle cx="{cx:.3f}" cy="{-cy:.3f}" r="{r:.3f}" fill="{fill}"{stroke}/>')
 
-    def ellipse(self, cx, cy, rx, ry, rot, fill):
+    def ellipse(self, cx, cy, rx, ry, rot, fill, color=None, width=0.0):
         self.grow(cx, -cy, max(rx, ry))
         transform = f' transform="rotate({-rot:.3f} {cx:.3f} {-cy:.3f})"' if rot else ""
+        stroke = f' stroke="{color}" stroke-width="{max(width, 0.4):.3f}"' if color else ""
         self.elements.append(
             f'<ellipse cx="{cx:.3f}" cy="{-cy:.3f}" rx="{rx:.3f}" ry="{ry:.3f}"'
-            f' fill="{fill}"{transform}/>')
+            f' fill="{fill}"{stroke}{transform}/>')
 
     def rect(self, cx, cy, w, h, rot, fill, radius=0.0, color=None, width=0.0):
         self.grow(cx, -cy, max(abs(w), abs(h)) / 2)
         transform = f' transform="rotate({-rot:.3f} {cx:.3f} {-cy:.3f})"' if rot else ""
         rounded = f' rx="{radius:.3f}"' if radius else ""
         stroke = f' stroke="{color}" stroke-width="{max(width, 0.4):.3f}"' if color else ""
+        # abs() on the corner too, not just on the extent: EasyEDA gives RECT as two
+        # corners in a Y-up space, so y2 - y1 is negative whenever the document lists
+        # the top corner first, and a signed half-height put the body a full height
+        # below its own pins.
         self.elements.append(
-            f'<rect x="{cx - w / 2:.3f}" y="{-cy - h / 2:.3f}" width="{abs(w):.3f}"'
+            f'<rect x="{cx - abs(w) / 2:.3f}" y="{-cy - abs(h) / 2:.3f}" width="{abs(w):.3f}"'
             f' height="{abs(h):.3f}"{rounded} fill="{fill}"{stroke}{transform}/>')
 
     def path(self, d, color=None, width=0.0, fill="none"):
@@ -370,6 +433,14 @@ def symbolSvg(dataStr):
                 drawing.circle(_num(_at(shape, 2)), _num(_at(shape, 3)), _num(_at(shape, 4)),
                                SYMBOL_COLOR, _lineWidth(lineStyles, _at(shape, 5)))
 
+            elif kind == "ELLIPSE":
+                # The polarity/pin-1 marker most symbols carry. Dropping it lost the
+                # dot EasyEDA draws at the corner of a regulator or a diode body.
+                drawing.ellipse(_num(_at(shape, 2)), _num(_at(shape, 3)),
+                                abs(_num(_at(shape, 4))), abs(_num(_at(shape, 5))),
+                                _num(_at(shape, 6)), "none", SYMBOL_COLOR,
+                                _lineWidth(lineStyles, _at(shape, 7)))
+
             elif kind == "ARC":
                 sx, sy = _num(_at(shape, 2)), _num(_at(shape, 3))
                 mx, my = _num(_at(shape, 4)), _num(_at(shape, 5))
@@ -417,7 +488,14 @@ def symbolSvg(dataStr):
             drawing.text(_num(x), _num(y), _at(shape, 4), size, color,
                          _num(_at(shape, 9)), anchor, baseline)
 
-        for pin in pins.values():
+        # Each pin's NAME/NUMBER/Pin Type live in child ATTRs keyed by the pin id.
+        pinInfo = {}
+
+        for shape in lines:
+            if shape[0] == "ATTR" and _at(shape, 2) in pins:
+                pinInfo.setdefault(_at(shape, 2), {})[str(_at(shape, 3) or "")] = _at(shape, 4)
+
+        for pinId, pin in pins.items():
             x, y = _num(_at(pin, 4)), _num(_at(pin, 5))
             length = _num(_at(pin, 6))
             rotation = _num(_at(pin, 7))
@@ -426,12 +504,21 @@ def symbolSvg(dataStr):
             rad = math.radians(rotation)
             ex = x + length * math.cos(rad)
             ey = y + length * math.sin(rad)
+            info = pinInfo.get(pinId) or {}
+
+            drawing.begin(data_kind="pin",
+                          data_number=info.get("NUMBER", _at(pin, 2)),
+                          data_name=info.get("NAME", ""),
+                          data_type=info.get("Pin Type", ""))
             drawing.line(x, y, ex, ey, SYMBOL_COLOR, 0.6)
 
             if _at(pin, 9) == 2:
                 # Inverted pin: EasyEDA draws a bubble at the body end.
                 drawing.circle(ex - 1.5 * math.cos(rad), ey - 1.5 * math.sin(rad), 1.5,
                                SYMBOL_COLOR, 0.6)
+
+            drawing.hit(x, y, ex, ey, 3.0)
+            drawing.end()
 
         return drawing.svg()
     except Exception as e:
@@ -477,10 +564,15 @@ def footprintSvg(dataStr):
         lines = parseLines(dataStr)
         drawing = _Drawing()
         colors = {}
+        layerNames = {}
 
         for shape in lines:
             if shape[0] == "LAYER" and isinstance(_at(shape, 1), int):
                 colors[shape[1]] = _at(shape, 5) if isinstance(_at(shape, 5), str) else "#888888"
+                # Index 3 is the human name ("Top Silkscreen Layer"); index 2 is the
+                # short code ("TOP_SILK"). The preview's layer toggles want the name.
+                label = _at(shape, 3) if isinstance(_at(shape, 3), str) else ""
+                layerNames[shape[1]] = label or str(_at(shape, 2) or f"Layer {shape[1]}")
 
         def colorOf(layer, default="#888888"):
             return colors.get(layer, default)
@@ -498,6 +590,8 @@ def footprintSvg(dataStr):
 
             if not isinstance(layer, int) or layer not in ARTWORK_LAYERS:
                 continue
+
+            shapeMark = len(drawing.elements)
 
             if kind == "PAD":
                 cx, cy = _num(_at(shape, 6)), _num(_at(shape, 7))
@@ -541,6 +635,14 @@ def footprintSvg(dataStr):
                     drawing.text(cx, cy, name, min(size * 0.5, 40), "#202020",
                                  anchor="middle", baseline="central")
 
+                # Pad geometry is in mils; the tooltip reports mm, which is what
+                # pcbnew shows and what a datasheet is checked against.
+                hx, hy = (_num(_at(hole, 1)), _num(_at(hole, 2))) if hole else (0.0, 0.0)
+                drawing.wrap(shapeMark, data_kind="pad", data_number=name,
+                             data_size=_padSize(padShape),
+                             data_drill=_mils(max(hx, hy)) if max(hx, hy) > 0 else "",
+                             data_layername=layerNames.get(layer, ""))
+
             elif kind == "POLY":
                 width = _num(_at(shape, 5), 1.0)
                 d, primitives = drawing.contour(_at(shape, 6) or [])
@@ -576,6 +678,12 @@ def footprintSvg(dataStr):
 
                 drawing.text(_num(x), _num(y), value, _num(_at(shape, 12), 40) * FONT_CAP_RATIO,
                              colorOf(layer), _num(_at(shape, 17)))
+
+            # Every drawn shape gets its layer, so the preview can switch layers off.
+            # Pads already wrapped themselves, and wrapping a wrap is harmless: the
+            # outer group is what the layer toggle looks at.
+            drawing.wrap(shapeMark, data_layer=layer,
+                         data_layername=layerNames.get(layer, f"Layer {layer}"))
 
         return drawing.svg()
     except Exception as e:

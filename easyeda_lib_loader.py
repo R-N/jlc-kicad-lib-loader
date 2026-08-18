@@ -132,8 +132,24 @@ DRAWING_PAGE = """<!DOCTYPE html><html><head><meta charset="utf-8"><style>
     .note { color: #666; font-size: 90%; text-align: center; margin: 0 12px; }
     #hint { position: absolute; right: 6px; bottom: 4px; color: #aaa;
             font-size: 10px; pointer-events: none; user-select: none; }
+    /* Hover highlight. A filter rather than a stroke override, which would repaint
+       every child of the group and lose the pad colours. */
+    .hot { filter: drop-shadow(0 0 2px #00a3ff) drop-shadow(0 0 6px #00a3ff); }
+    #tip { position: absolute; left: 0; top: 0; pointer-events: none; display: none;
+           background: #263238; color: #fff; font-size: 11px; line-height: 1.45;
+           padding: 4px 7px; border-radius: 3px; white-space: pre; z-index: 3;
+           box-shadow: 0 1px 4px rgba(0,0,0,.35); }
+    #layers { position: absolute; left: 6px; top: 6px; z-index: 2; font-size: 11px;
+              background: rgba(255,255,255,.92); border: 1px solid #d0d0d0;
+              border-radius: 3px; padding: 3px 6px; max-height: 60%; overflow: auto;
+              user-select: none; }
+    #layers.empty { display: none; }
+    #layers label { display: block; white-space: nowrap; cursor: pointer; }
+    #layers input { vertical-align: -1px; margin: 0 4px 0 0; }
+    #layers .sw { display: inline-block; width: 8px; height: 8px; margin-right: 4px;
+                  border: 1px solid #999; }
 </style></head><body>
-<div id="vp"><div id="cv">__BODY__</div></div>
+<div id="vp"><div id="cv">__BODY__</div><div id="layers" class="empty"></div><div id="tip"></div></div>
 <div id="hint">scroll: zoom &middot; drag: pan &middot; double-click: reset</div>
 <script>
 (function () {
@@ -171,6 +187,97 @@ DRAWING_PAGE = """<!DOCTYPE html><html><head><meta charset="utf-8"><style>
 
     window.addEventListener('mouseup', function () { down = false; vp.className = ''; });
     vp.addEventListener('dblclick', function () { k = 1; x = 0; y = 0; apply(); });
+
+    // ---- hover: what is under the cursor -------------------------------------
+    var tip = document.getElementById('tip'), hot = null;
+
+    function describe(g) {
+        var d = g.dataset, out = [];
+
+        if (d.kind === 'pin') {
+            out.push('Pin ' + (d.number || '?') + (d.name ? '  ' + d.name : ''));
+            if (d.type && d.type !== 'Undefined') { out.push('Type: ' + d.type); }
+        } else if (d.kind === 'pad') {
+            out.push('Pad ' + (d.number || '?'));
+            if (d.size) { out.push('Size: ' + d.size); }
+            if (d.drill) { out.push('Drill: ' + d.drill); }
+            if (d.layername) { out.push(d.layername); }
+        }
+
+        return out.join('\\n');
+    }
+
+    function unhover() {
+        if (hot) { hot.classList.remove('hot'); hot = null; }
+        tip.style.display = 'none';
+    }
+
+    vp.addEventListener('mousemove', function (e) {
+        // Panning takes precedence: a tooltip chasing the cursor mid-drag is noise.
+        if (down) { unhover(); return; }
+
+        var g = e.target.closest ? e.target.closest('g[data-kind]') : null;
+        var text = g ? describe(g) : '';
+
+        if (!g || !text) { unhover(); return; }
+
+        if (g !== hot) { unhover(); hot = g; g.classList.add('hot'); }
+
+        tip.textContent = text;
+        tip.style.display = 'block';
+        // Keep the tooltip inside the panel, or it is clipped away at the edges.
+        var r = vp.getBoundingClientRect(), tw = tip.offsetWidth, th = tip.offsetHeight;
+        var px = e.clientX - r.left + 12, py = e.clientY - r.top + 12;
+        tip.style.left = Math.max(0, Math.min(px, r.width - tw - 2)) + 'px';
+        tip.style.top = Math.max(0, Math.min(py, r.height - th - 2)) + 'px';
+    });
+
+    vp.addEventListener('mouseleave', unhover);
+
+    // ---- footprint layers: one checkbox per layer actually drawn -------------
+    var panel = document.getElementById('layers');
+    var seen = {}, order = [];
+
+    Array.prototype.forEach.call(cv.querySelectorAll('g[data-layer]'), function (g) {
+        var id = g.dataset.layer;
+
+        if (!seen[id]) {
+            seen[id] = { name: g.dataset.layername || ('Layer ' + id), groups: [] };
+            order.push(id);
+        }
+
+        seen[id].groups.push(g);
+    });
+
+    // A symbol has no layers at all, and one lone layer is not worth a panel.
+    if (order.length > 1) {
+        panel.classList.remove('empty');
+        order.forEach(function (id) {
+            var entry = seen[id];
+            var label = document.createElement('label');
+            var box = document.createElement('input');
+            box.type = 'checkbox';
+            box.checked = true;
+            box.addEventListener('change', function () {
+                entry.groups.forEach(function (g) {
+                    g.style.display = box.checked ? '' : 'none';
+                });
+                unhover();
+            });
+            var swatch = document.createElement('span');
+            swatch.className = 'sw';
+            // Colour the swatch from what the layer actually drew, so it matches.
+            var painted = entry.groups[0].querySelector('[fill], [stroke]');
+            var colour = painted ? (painted.getAttribute('fill') !== 'none'
+                                    ? painted.getAttribute('fill')
+                                    : painted.getAttribute('stroke')) : '';
+            swatch.style.background = colour && colour !== 'none' ? colour : 'transparent';
+            label.appendChild(box);
+            label.appendChild(swatch);
+            label.appendChild(document.createTextNode(entry.name));
+            panel.appendChild(label);
+        });
+    }
 })();
 </script></body></html>"""
 
@@ -184,10 +291,12 @@ def drawingPage( body ):
 SOURCE_SEARCHES = []
 
 # Columns of the results grid, in order. The row builders below must match.
-# Eight columns share the results pane, so the headings are short enough not to be
-# truncated themselves; the widths fit "Extended", "Footprint" and a supplier name.
-RESULT_COLUMNS = (("Src", 64), ("Code", 90), ("Name", 118), ("Description", 160),
-                  ("Package", 84), ("Class", 88), ("Type", 74), ("By", 72))
+# Symbol and Footprint are the names KiCad's choosers will show, which are neither
+# the part number nor the package: one SOT-23 footprint document serves hundreds of
+# parts, so seeing them before downloading is what tells you what you will get.
+RESULT_COLUMNS = (("Src", 58), ("Code", 84), ("Name", 128), ("Value", 90),
+                  ("Description", 150), ("Symbol", 118), ("Footprint", 150),
+                  ("Package", 80), ("Class", 74), ("Type", 66), ("By", 68))
 
 # Source labels, also what the Source column shows.
 SOURCE_SYSTEM = "System"
@@ -208,12 +317,29 @@ def tagText(tags):
             out.append(name)
     return " ".join(out)
 
+def valueOf(attributes):
+    """The schematic value, resolved the way EasyEDA resolves it.
+
+    A Pro device's `Name` attribute is a template naming the attribute that supplies
+    the value: "={Value}" on a resistor, "={Manufacturer Part}" on an IC. Showing the
+    template itself is useless, so it is substituted; a literal `Name` is used as is.
+    """
+    attributes = attributes or {}
+    template = str(attributes.get("Name") or "").strip()
+    field = re.fullmatch(r"=\{(.+)\}", template)
+
+    if field:
+        return str(attributes.get(field.group(1), "") or "")
+
+    return template or str(attributes.get("Value", "") or "")
+
 def proRow(entry, source=SOURCE_PUBLIC):
     """A results row for an EasyEDA Pro device, as the search API returns it."""
     attributes = entry.get("attributes") or {}
     code = entry.get("product_code") or entry.get("uuid", "")
     name = entry.get("display_title") or entry.get("title", "")
     description = attributes.get("LCSC Part Name", "")
+    footprintName = (entry.get("footprint") or {}).get("display_title", "")
 
     searchable = " ".join(filter(None, [
         name,
@@ -225,11 +351,15 @@ def proRow(entry, source=SOURCE_PUBLIC):
     return (source,
             code,
             name,
+            valueOf(attributes),
             description,
+            # What eeschema and pcbnew will call them, which is the footprint
+            # document's own title, not the package and not the part number.
+            (entry.get("symbol") or {}).get("display_title", ""),
+            footprintName,
             # The footprint document title is unreadable ("SOT-223-3_L6.5-W3.4-P2.30-LS7.0-BR");
             # the supplier's package name is what a person recognises.
-            attributes.get("Supplier Footprint")
-            or ((entry.get("footprint") or {}).get("display_title", "")),
+            attributes.get("Supplier Footprint") or footprintName,
             (attributes.get("JLCPCB Part Class") or "").replace(" Part", ""),
             "Device",
             contributorOf(entry),
@@ -245,12 +375,20 @@ def stdRow(entry):
     head = dataStr.get("head") or {}
     params = head.get("c_para") or {}
     kind = "Footprint" if str(head.get("docType")) == "4" else "Symbol"
+    title = entry.get("title", "")
+    package = params.get("package", "")
 
     return (SOURCE_STD,
             STD_PREFIX + entry["uuid"],
-            entry.get("title", ""),
+            title,
+            # Std documents keep the schematic value under "name".
+            params.get("name", ""),
             "",
-            params.get("package", ""),
+            # A Std symbol is imported under its own title; a footprint document is
+            # imported under its package, which is also the only package it names.
+            title if kind == "Symbol" else "",
+            package,
+            package,
             "",
             kind,
             contributorOf(entry),
@@ -645,6 +783,17 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
 
             refreshQueue()
 
+        def pageSize():
+            """Results per request, as chosen in the search bar.
+
+            Read at call time rather than captured, so changing it takes effect on the
+            next search without rebuilding the search functions.
+            """
+            try:
+                return int(dlg.m_pageSizeChoice.GetStringSelection()) or SEARCH_PAGE_SIZE
+            except (ValueError, AttributeError):
+                return SEARCH_PAGE_SIZE
+
         def stdSearchFn(words, page, append=False):
             """EasyEDA Std search. Returns (count, totalPages)."""
             if isUuid(words.strip()):
@@ -667,7 +816,7 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
                 "uid": "user",
                 "wd": words,
                 "page": page,
-                "pageSize": SEARCH_PAGE_SIZE,
+                "pageSize": pageSize(),
                 "returnListStyle": "classifyarr"
             } )
             resp.raise_for_status()
@@ -687,7 +836,7 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
             """EasyEDA Pro search. Returns (count, totalPages)."""
             reqData = {
                 "page": page,
-                "pageSize": SEARCH_PAGE_SIZE,
+                "pageSize": pageSize(),
                 "wd": words,
                 "returnListStyle": "classifyarr"
             }
@@ -718,7 +867,7 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
                 source = PRO_FACET_SOURCE.get(key, SOURCE_PUBLIC)
                 addRows([proRow(entry, source) for entry in result["lists"].get(key) or []])
 
-            return count, math.ceil(count / SEARCH_PAGE_SIZE)
+            return count, math.ceil(count / pageSize())
 
         def searchWorker(sourceId, words, page):
             setStatus("Searching…")
@@ -952,14 +1101,17 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
                         links.append(("JLCPCB", f"https://jlcpcb.com/partdetail/{code}"))
                         links.append(("LCSC", f"https://www.lcsc.com/product-detail/{code}.html"))
 
-                    # Last: the drawings are a bonus, the links above must survive their failure
-                    preview_symbol, preview_footprint = productSvgs(code)
+                    # Last: the drawings are a bonus, the links above must survive their failure.
+                    # Our own render comes first even when EasyEDA has one: only markup we
+                    # generate carries the pin/pad/layer metadata the preview hovers and
+                    # toggles on, and it is the same geometry the importer will produce.
+                    preview_symbol, preview_footprint = proDrawings(
+                        attributes.get('Symbol'), attributes.get('Footprint'))
 
                     if not preview_symbol and not preview_footprint:
-                        # EasyEDA only renders parts with an LCSC code, so draw the
-                        # documents ourselves for the ones it never rendered.
-                        preview_symbol, preview_footprint = proDrawings(
-                            attributes.get('Symbol'), attributes.get('Footprint'))
+                        # Nothing drawable in the documents: fall back to the flat SVG
+                        # EasyEDA renders for LCSC-coded parts.
+                        preview_symbol, preview_footprint = productSvgs(code)
                 except Exception as e:
                     traceback.print_exc()
                     warning(f"Failed to load device info for {itemCode}: {e}")
@@ -1053,6 +1205,8 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
         dlg.m_textCtrlSearch.Bind(wx.EVT_TEXT_ENTER, onSearch)
         dlg.m_textCtrlFilter.Bind(wx.EVT_TEXT, onFilter)
         dlg.m_libSourceChoice.Bind(wx.EVT_CHOICE, onSearch)
+        # A new page size changes what a page even is, so re-ask from page one.
+        dlg.m_pageSizeChoice.Bind(wx.EVT_CHOICE, onSearch)
         dlg.m_debug.Bind(wx.EVT_CHECKBOX, onDebugCheckbox)
         dlg.m_queueAddBtn.Bind(wx.EVT_BUTTON, onQueueAdd)
         dlg.m_queuePasteBtn.Bind(wx.EVT_BUTTON, onQueuePaste)

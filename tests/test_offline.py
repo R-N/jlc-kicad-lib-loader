@@ -91,7 +91,15 @@ def test_real_document():
     # 13/48/49/50/51 that must not be drawn).
     symbol = pro_render.symbolSvg(fixture["symbol"])
     check(symbol.startswith("<svg"), "symbol did not render")
-    check(symbol.count("<line") == 4, f"expected 4 pin lines, got {symbol.count('<line')}")
+    # Each pin draws its line plus an invisible fat stroke that makes it hoverable,
+    # so the drawn lines are the ones that are not transparent.
+    check(symbol.count("<line") == 8, f"expected 8 lines, got {symbol.count('<line')}")
+    check(symbol.count('stroke-opacity="0"') == 4,
+          f"expected 4 hoverable pin targets, got {symbol.count('stroke-opacity=&quot;0&quot;')}")
+    check(symbol.count('data-kind="pin"') == 4,
+          f"expected 4 pins carrying hover data, got {symbol.count(chr(39))}")
+    check('data-name="GND"' in symbol and 'data-number="1"' in symbol,
+          "pin metadata lost its name or number")
     check(symbol.count("<rect") == 1, f"expected 1 body rect, got {symbol.count('<rect')}")
     check(texts(symbol) == ["In", "3", "Out", "2", "GND", "1", "TAB", "4"],
           f"pin names/numbers wrong: {texts(symbol)}")
@@ -725,12 +733,14 @@ PRO_DEVICE = {
     "uuid": "8209ba65d24940569c88b6b832f4ceb3",
     "product_code": "C6186",
     "display_title": "AMS1117-3.3_C6186",
+    "symbol": {"display_title": "AMS1117-3.3"},
     "footprint": {"display_title": "SOT-223-3_L6.5-W3.4-P2.30-LS7.0-BR"},
     "creator": {"nickname": "LCSC"},
     "tags": {"parent_tag": {"name": "Power Management"},
              "child_tag": {"name": "LDO Regulators"}},
     "attributes": {"LCSC Part Name": "1A low dropout 3.3V regulator",
                    "Manufacturer Part": "AMS1117-3.3", "Supplier Footprint": "SOT-223",
+                   "Name": "={Manufacturer Part}",
                    "JLCPCB Part Class": "Basic Part", "Supplier Part": "C6186",
                    "Dropout Voltage": "1.1V"},
 }
@@ -749,14 +759,28 @@ def test_result_rows():
     row = ell.proRow(PRO_DEVICE, ell.SOURCE_SYSTEM)
     check(len(row) == len(ell.RESULT_COLUMNS) + 1,
           "row is the columns plus one hidden searchable cell")
-    # Name is the symbol/part number; Description is the LCSC Part Name. Both stay
-    # in the grid, and both are searchable.
+    # Name is the device/part number, Value the resolved schematic value, Description
+    # the LCSC Part Name, and Symbol/Footprint the names KiCad's choosers will show.
     check(row[2] == "AMS1117-3.3_C6186", f"name column shows {row[2]!r}")
-    check(row[3] == "1A low dropout 3.3V regulator", f"description column shows {row[3]!r}")
+    check(row[3] == "AMS1117-3.3", f"value column shows {row[3]!r}")
+    check(row[4] == "1A low dropout 3.3V regulator", f"description column shows {row[4]!r}")
+    check(row[5] == "AMS1117-3.3", f"symbol column shows {row[5]!r}")
+    check(row[6] == "SOT-223-3_L6.5-W3.4-P2.30-LS7.0-BR", f"footprint column shows {row[6]!r}")
     # The document title is unreadable; the supplier package is what a person knows.
-    check(row[4] == "SOT-223", f"package column shows {row[4]!r}")
-    check(row[5] == "Basic", f"part class should drop the word Part: {row[5]!r}")
-    check(row[7] == "LCSC", "contributor column")
+    check(row[7] == "SOT-223", f"package column shows {row[7]!r}")
+    check(row[8] == "Basic", f"part class should drop the word Part: {row[8]!r}")
+    check(row[10] == "LCSC", "contributor column")
+
+    # "Name" is a template naming the attribute that holds the value, exactly as
+    # EasyEDA stores it. A resistor points at Value; an IC at Manufacturer Part.
+    check(ell.valueOf({"Name": "={Value}", "Value": "100kΩ"}) == "100kΩ",
+          "a ={Value} template must resolve to the value")
+    check(ell.valueOf({"Name": "={Manufacturer Part}", "Manufacturer Part": "AO3401A"})
+          == "AO3401A", "a ={Manufacturer Part} template must resolve")
+    check(ell.valueOf({"Name": "10k"}) == "10k", "a literal Name is the value")
+    check(ell.valueOf({"Value": "4.7uF"}) == "4.7uF", "with no Name, Value is the value")
+    check(ell.valueOf({"Name": "={Missing}"}) == "", "an unresolvable template must be empty")
+    check(ell.valueOf({}) == "" and ell.valueOf(None) == "", "no attributes must not raise")
 
     # An uncoded device in JLC's own catalogue is still a JLC System part: the facet
     # decides, not the presence of a code.
@@ -767,13 +791,18 @@ def test_result_rows():
 
     # A Std standalone footprint has to be distinguishable from a symbol.
     footprint = ell.stdRow(STD_FOOTPRINT_ENTRY)
-    check(footprint[0] == "Std" and footprint[6] == "Footprint", f"std footprint row: {footprint}")
+    check(footprint[0] == "Std" and footprint[9] == "Footprint", f"std footprint row: {footprint}")
     check(footprint[1] == "std:" + STD_FOOTPRINT_ENTRY["uuid"], "std rows need the std: prefix")
-    check(footprint[7] == "adafruit", "contributor from owner.username")
+    check(footprint[10] == "adafruit", "contributor from owner.username")
+    # A footprint document is imported under its package, and names no symbol.
+    check(footprint[5] == "" and footprint[6] == "MAX17048_BREAKOUT",
+          f"std footprint symbol/footprint cells: {footprint[5]!r}, {footprint[6]!r}")
 
     symbolEntry = json.loads(json.dumps(STD_FOOTPRINT_ENTRY))
     symbolEntry["dataStr"]["head"]["docType"] = "2"
-    check(ell.stdRow(symbolEntry)[6] == "Symbol", "docType 2 is a symbol")
+    check(ell.stdRow(symbolEntry)[9] == "Symbol", "docType 2 is a symbol")
+    check(ell.stdRow(symbolEntry)[5] == "MAX17048_BREAKOUT",
+          "a std symbol is imported under its own title")
 
 
 def test_filter_and_sort():

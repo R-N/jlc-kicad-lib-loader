@@ -49,7 +49,7 @@
       <property name="name">EasyEdaLibLoaderDialog</property>
       <property name="pos" />
       <property name="size">1180,820</property>
-      <property name="style">wxDEFAULT_DIALOG_STYLE|wxRESIZE_BORDER</property>
+      <property name="style">wxDEFAULT_DIALOG_STYLE|wxMAXIMIZE_BOX|wxRESIZE_BORDER</property>
       <property name="subclass">; ; forward_declare</property>
       <property name="title">JLCPCB/LCSC Library Loader. Unofficial, use at your own risk.</property>
       <property name="tooltip" />
@@ -135,7 +135,7 @@
                 <property name="enabled">1</property>
                 <property name="hidden">0</property>
                 <property name="id">wxID_ANY</property>
-                <property name="label">Filter:</property>
+                <property name="label">Narrow these results:</property>
                 <property name="name">m_filterLabel</property>
                 <property name="permission">protected</property>
                 <property name="wrap">-1</property>
@@ -156,6 +156,39 @@
                 <property name="style" />
                 <property name="tooltip">Narrows the results below across every column</property>
                 <property name="value" />
+                <property name="window_style" />
+              </object>
+            </object>
+            <object class="sizeritem" expanded="true">
+              <property name="border">5</property>
+              <property name="flag">wxALIGN_CENTER_VERTICAL|wxLEFT</property>
+              <property name="proportion">0</property>
+              <object class="wxStaticText" expanded="true">
+                <property name="enabled">1</property>
+                <property name="hidden">0</property>
+                <property name="id">wxID_ANY</property>
+                <property name="label">Per page:</property>
+                <property name="name">m_pageSizeLabel</property>
+                <property name="permission">public</property>
+                <property name="wrap">-1</property>
+              </object>
+            </object>
+            <object class="sizeritem" expanded="true">
+              <property name="border">5</property>
+              <property name="flag">wxALIGN_CENTER_VERTICAL|wxRIGHT|wxTOP|wxBOTTOM</property>
+              <property name="proportion">0</property>
+              <object class="wxChoice" expanded="true">
+                <property name="choices">"10" "25" "50" "100" "200"</property>
+                <property name="enabled">1</property>
+                <property name="hidden">0</property>
+                <property name="id">wxID_ANY</property>
+                <property name="maximum_size" />
+                <property name="minimum_size" />
+                <property name="name">m_pageSizeChoice</property>
+                <property name="permission">public</property>
+                <property name="selection">2</property>
+                <property name="style" />
+                <property name="tooltip">How many results each search asks for</property>
                 <property name="window_style" />
               </object>
             </object>
@@ -445,6 +478,212 @@
                       </object>
                     </object>
                   </object>
+                  <object class="sizeritem" expanded="true">
+                    <property name="border">5</property>
+                    <property name="flag">wxEXPAND|wxLEFT|wxRIGHT</property>
+                    <property name="proportion">0</property>
+                    <object class="wxBoxSizer" expanded="true">
+                      <property name="minimum_size" />
+                      <property name="name">bSizerLibrary</property>
+                      <property name="orient">wxHORIZONTAL</property>
+                      <property name="permission">none</property>
+                      <object class="sizeritem" expanded="true">
+                        <property name="border">5</property>
+                        <property name="flag">wxALIGN_CENTER_VERTICAL|wxALL</property>
+                        <property name="proportion">0</property>
+                        <object class="wxStaticText" expanded="true">
+                          <property name="enabled">1</property>
+                          <property name="hidden">0</property>
+                          <property name="id">wxID_ANY</property>
+                          <property name="label">Library:</property>
+                          <property name="name">m_staticText2</property>
+                          <property name="permission">protected</property>
+                          <property name="wrap">-1</property>
+                        </object>
+                      </object>
+                      <object class="sizeritem" expanded="true">
+                        <property name="border">5</property>
+                        <property name="flag">wxALIGN_CENTER_VERTICAL|wxBOTTOM|wxEXPAND|wxTOP</property>
+                        <property name="proportion">1</property>
+                        <object class="wxTextCtrl" expanded="true">
+                          <property name="enabled">1</property>
+                          <property name="hidden">0</property>
+                          <property name="id">wxID_ANY</property>
+                          <property name="maximum_size" />
+                          <property name="minimum_size" />
+                          <property name="name">m_textCtrlOutLibName</property>
+                          <property name="permission">public</property>
+                          <property name="style" />
+                          <property name="tooltip">Library name inside the project, or an absolute path</property>
+                          <property name="value" />
+                          <property name="window_style" />
+                        </object>
+                      </object>
+                      <object class="sizeritem" expanded="true">
+                        <property name="border">5</property>
+                        <property name="flag">wxALIGN_CENTER_VERTICAL|wxALL</property>
+                        <property name="proportion">0</property>
+                        <object class="wxButton" expanded="true">
+                          <property name="default">0</property>
+                          <property name="enabled">1</property>
+                          <property name="hidden">0</property>
+                          <property name="id">wxID_ANY</property>
+                          <property name="label">Browse…</property>
+                          <property name="maximum_size" />
+                          <property name="minimum_size" />
+                          <property name="name">m_browseBtn</property>
+                          <property name="permission">public</property>
+                          <property name="style" />
+                          <property name="tooltip">Choose the folder the library is written to</property>
+                          <property name="window_style" />
+                        </object>
+                      </object>
+                      <object class="sizeritem" expanded="true">
+                        <property name="border">10</property>
+                        <property name="flag">wxALIGN_CENTER_VERTICAL|wxBOTTOM|wxLEFT|wxTOP</property>
+                        <property name="proportion">0</property>
+                        <object class="wxButton" expanded="true">
+                          <property name="default">0</property>
+                          <property name="enabled">0</property>
+                          <property name="hidden">0</property>
+                          <property name="id">wxID_ANY</property>
+                          <property name="label">Download parts</property>
+                          <property name="maximum_size" />
+                          <property name="minimum_size" />
+                          <property name="name">m_actionBtn</property>
+                          <property name="permission">public</property>
+                          <property name="style" />
+                          <property name="tooltip">Download everything in the queue</property>
+                          <property name="window_style" />
+                        </object>
+                      </object>
+                    </object>
+                  </object>
+                  <object class="sizeritem" expanded="true">
+                    <property name="border">5</property>
+                    <property name="flag">wxEXPAND|wxLEFT|wxRIGHT</property>
+                    <property name="proportion">0</property>
+                    <object class="wxBoxSizer" expanded="true">
+                      <property name="minimum_size" />
+                      <property name="name">bSizerProgress</property>
+                      <property name="orient">wxHORIZONTAL</property>
+                      <property name="permission">none</property>
+                      <object class="sizeritem" expanded="true">
+                        <property name="border">5</property>
+                        <property name="flag">wxALIGN_CENTER_VERTICAL|wxALL</property>
+                        <property name="proportion">1</property>
+                        <object class="wxGauge" expanded="true">
+                          <property name="enabled">1</property>
+                          <property name="hidden">0</property>
+                          <property name="id">wxID_ANY</property>
+                          <property name="maximum_size" />
+                          <property name="minimum_size">-1,18</property>
+                          <property name="name">m_progress</property>
+                          <property name="permission">public</property>
+                          <property name="range">100</property>
+                          <property name="style">wxGA_HORIZONTAL</property>
+                          <property name="tooltip" />
+                          <property name="value">0</property>
+                          <property name="window_style" />
+                        </object>
+                      </object>
+                      <object class="sizeritem" expanded="true">
+                        <property name="border">5</property>
+                        <property name="flag">wxALIGN_CENTER_VERTICAL|wxALL</property>
+                        <property name="proportion">2</property>
+                        <object class="wxStaticText" expanded="true">
+                          <property name="enabled">1</property>
+                          <property name="hidden">0</property>
+                          <property name="id">wxID_ANY</property>
+                          <property name="label" />
+                          <property name="name">m_resultStatus</property>
+                          <property name="permission">public</property>
+                          <property name="wrap">-1</property>
+                        </object>
+                      </object>
+                    <object class="sizeritem" expanded="true">
+                        <property name="border">5</property>
+                        <property name="flag">wxALIGN_CENTER_VERTICAL|wxALL</property>
+                        <property name="proportion">0</property>
+                        <object class="wxCheckBox" expanded="true">
+                          <property name="checked">0</property>
+                          <property name="enabled">1</property>
+                          <property name="hidden">0</property>
+                          <property name="id">wxID_ANY</property>
+                          <property name="label">Debug</property>
+                          <property name="maximum_size" />
+                          <property name="minimum_size" />
+                          <property name="name">m_debug</property>
+                          <property name="permission">public</property>
+                          <property name="style" />
+                          <property name="tooltip">Log every request and document</property>
+                          <property name="window_style" />
+                        </object>
+                      </object>
+                      <object class="sizeritem" expanded="true">
+                        <property name="border">5</property>
+                        <property name="flag">wxALIGN_CENTER_VERTICAL|wxALL</property>
+                        <property name="proportion">0</property>
+                        <object class="wxButton" expanded="true">
+                          <property name="default">0</property>
+                          <property name="enabled">1</property>
+                          <property name="hidden">0</property>
+                          <property name="id">wxID_CANCEL</property>
+                          <property name="label">Close dialog</property>
+                          <property name="maximum_size" />
+                          <property name="minimum_size" />
+                          <property name="name">m_closeButton</property>
+                          <property name="permission">public</property>
+                          <property name="style" />
+                          <property name="tooltip" />
+                          <property name="window_style" />
+                        </object>
+                      </object>
+                    </object>
+                  </object>
+                  <object class="sizeritem" expanded="true">
+                    <property name="border">5</property>
+                    <property name="flag">wxEXPAND|wxLEFT|wxRIGHT</property>
+                    <property name="proportion">0</property>
+                    <object class="wxCollapsiblePane" expanded="true">
+                      <property name="collapsed">1</property>
+                      <property name="enabled">1</property>
+                      <property name="hidden">0</property>
+                      <property name="id">wxID_ANY</property>
+                      <property name="label">Details</property>
+                      <property name="maximum_size" />
+                      <property name="minimum_size" />
+                      <property name="name">m_logPane</property>
+                      <property name="permission">public</property>
+                      <property name="style">wxCP_DEFAULT_STYLE</property>
+                      <property name="tooltip">Full log of the last run</property>
+                      <property name="window_style" />
+                      <object class="wxBoxSizer" expanded="true">
+                        <property name="minimum_size" />
+                        <property name="name">bSizerLogPane</property>
+                        <property name="orient">wxVERTICAL</property>
+                        <property name="permission">none</property>
+                        <object class="sizeritem" expanded="true">
+                          <property name="border">2</property>
+                          <property name="flag">wxEXPAND|wxALL</property>
+                          <property name="proportion">1</property>
+                          <object class="wxTextCtrl" expanded="true">
+                            <property name="enabled">1</property>
+                            <property name="hidden">0</property>
+                            <property name="id">wxID_ANY</property>
+                            <property name="maximum_size" />
+                            <property name="minimum_size">400,150</property>
+                            <property name="name">m_log</property>
+                            <property name="permission">public</property>
+                            <property name="style">wxTE_BESTWRAP|wxTE_MULTILINE|wxTE_READONLY</property>
+                            <property name="tooltip" />
+                            <property name="value" />
+                            <property name="window_style" />
+                          </object>
+                        </object>
+                      </object>
+                    </object>
+                  </object>
                 </object>
               </object>
             </object>
@@ -689,212 +928,6 @@
                       </object>
                     </object>
                   </object>
-                </object>
-              </object>
-            </object>
-          </object>
-        </object>
-        <object class="sizeritem" expanded="true">
-          <property name="border">5</property>
-          <property name="flag">wxEXPAND|wxLEFT|wxRIGHT</property>
-          <property name="proportion">0</property>
-          <object class="wxBoxSizer" expanded="true">
-            <property name="minimum_size" />
-            <property name="name">bSizerLibrary</property>
-            <property name="orient">wxHORIZONTAL</property>
-            <property name="permission">none</property>
-            <object class="sizeritem" expanded="true">
-              <property name="border">5</property>
-              <property name="flag">wxALIGN_CENTER_VERTICAL|wxALL</property>
-              <property name="proportion">0</property>
-              <object class="wxStaticText" expanded="true">
-                <property name="enabled">1</property>
-                <property name="hidden">0</property>
-                <property name="id">wxID_ANY</property>
-                <property name="label">Library:</property>
-                <property name="name">m_staticText2</property>
-                <property name="permission">protected</property>
-                <property name="wrap">-1</property>
-              </object>
-            </object>
-            <object class="sizeritem" expanded="true">
-              <property name="border">5</property>
-              <property name="flag">wxALIGN_CENTER_VERTICAL|wxBOTTOM|wxEXPAND|wxTOP</property>
-              <property name="proportion">1</property>
-              <object class="wxTextCtrl" expanded="true">
-                <property name="enabled">1</property>
-                <property name="hidden">0</property>
-                <property name="id">wxID_ANY</property>
-                <property name="maximum_size" />
-                <property name="minimum_size" />
-                <property name="name">m_textCtrlOutLibName</property>
-                <property name="permission">public</property>
-                <property name="style" />
-                <property name="tooltip">Library name inside the project, or an absolute path</property>
-                <property name="value" />
-                <property name="window_style" />
-              </object>
-            </object>
-            <object class="sizeritem" expanded="true">
-              <property name="border">5</property>
-              <property name="flag">wxALIGN_CENTER_VERTICAL|wxALL</property>
-              <property name="proportion">0</property>
-              <object class="wxButton" expanded="true">
-                <property name="default">0</property>
-                <property name="enabled">1</property>
-                <property name="hidden">0</property>
-                <property name="id">wxID_ANY</property>
-                <property name="label">Browse…</property>
-                <property name="maximum_size" />
-                <property name="minimum_size" />
-                <property name="name">m_browseBtn</property>
-                <property name="permission">public</property>
-                <property name="style" />
-                <property name="tooltip">Choose the folder the library is written to</property>
-                <property name="window_style" />
-              </object>
-            </object>
-            <object class="sizeritem" expanded="true">
-              <property name="border">10</property>
-              <property name="flag">wxALIGN_CENTER_VERTICAL|wxBOTTOM|wxLEFT|wxTOP</property>
-              <property name="proportion">0</property>
-              <object class="wxButton" expanded="true">
-                <property name="default">0</property>
-                <property name="enabled">0</property>
-                <property name="hidden">0</property>
-                <property name="id">wxID_ANY</property>
-                <property name="label">Download parts</property>
-                <property name="maximum_size" />
-                <property name="minimum_size" />
-                <property name="name">m_actionBtn</property>
-                <property name="permission">public</property>
-                <property name="style" />
-                <property name="tooltip">Download everything in the queue</property>
-                <property name="window_style" />
-              </object>
-            </object>
-          </object>
-        </object>
-        <object class="sizeritem" expanded="true">
-          <property name="border">5</property>
-          <property name="flag">wxEXPAND|wxLEFT|wxRIGHT</property>
-          <property name="proportion">0</property>
-          <object class="wxBoxSizer" expanded="true">
-            <property name="minimum_size" />
-            <property name="name">bSizerProgress</property>
-            <property name="orient">wxHORIZONTAL</property>
-            <property name="permission">none</property>
-            <object class="sizeritem" expanded="true">
-              <property name="border">5</property>
-              <property name="flag">wxALIGN_CENTER_VERTICAL|wxALL</property>
-              <property name="proportion">1</property>
-              <object class="wxGauge" expanded="true">
-                <property name="enabled">1</property>
-                <property name="hidden">0</property>
-                <property name="id">wxID_ANY</property>
-                <property name="maximum_size" />
-                <property name="minimum_size">-1,18</property>
-                <property name="name">m_progress</property>
-                <property name="permission">public</property>
-                <property name="range">100</property>
-                <property name="style">wxGA_HORIZONTAL</property>
-                <property name="tooltip" />
-                <property name="value">0</property>
-                <property name="window_style" />
-              </object>
-            </object>
-            <object class="sizeritem" expanded="true">
-              <property name="border">5</property>
-              <property name="flag">wxALIGN_CENTER_VERTICAL|wxALL</property>
-              <property name="proportion">2</property>
-              <object class="wxStaticText" expanded="true">
-                <property name="enabled">1</property>
-                <property name="hidden">0</property>
-                <property name="id">wxID_ANY</property>
-                <property name="label" />
-                <property name="name">m_resultStatus</property>
-                <property name="permission">public</property>
-                <property name="wrap">-1</property>
-              </object>
-            </object>
-          <object class="sizeritem" expanded="true">
-              <property name="border">5</property>
-              <property name="flag">wxALIGN_CENTER_VERTICAL|wxALL</property>
-              <property name="proportion">0</property>
-              <object class="wxCheckBox" expanded="true">
-                <property name="checked">0</property>
-                <property name="enabled">1</property>
-                <property name="hidden">0</property>
-                <property name="id">wxID_ANY</property>
-                <property name="label">Debug</property>
-                <property name="maximum_size" />
-                <property name="minimum_size" />
-                <property name="name">m_debug</property>
-                <property name="permission">public</property>
-                <property name="style" />
-                <property name="tooltip">Log every request and document</property>
-                <property name="window_style" />
-              </object>
-            </object>
-            <object class="sizeritem" expanded="true">
-              <property name="border">5</property>
-              <property name="flag">wxALIGN_CENTER_VERTICAL|wxALL</property>
-              <property name="proportion">0</property>
-              <object class="wxButton" expanded="true">
-                <property name="default">0</property>
-                <property name="enabled">1</property>
-                <property name="hidden">0</property>
-                <property name="id">wxID_CANCEL</property>
-                <property name="label">Close dialog</property>
-                <property name="maximum_size" />
-                <property name="minimum_size" />
-                <property name="name">m_closeButton</property>
-                <property name="permission">public</property>
-                <property name="style" />
-                <property name="tooltip" />
-                <property name="window_style" />
-              </object>
-            </object>
-          </object>
-        </object>
-        <object class="sizeritem" expanded="true">
-          <property name="border">5</property>
-          <property name="flag">wxEXPAND|wxLEFT|wxRIGHT</property>
-          <property name="proportion">0</property>
-          <object class="wxCollapsiblePane" expanded="true">
-            <property name="collapsed">1</property>
-            <property name="enabled">1</property>
-            <property name="hidden">0</property>
-            <property name="id">wxID_ANY</property>
-            <property name="label">Details</property>
-            <property name="maximum_size" />
-            <property name="minimum_size" />
-            <property name="name">m_logPane</property>
-            <property name="permission">public</property>
-            <property name="style">wxCP_DEFAULT_STYLE</property>
-            <property name="tooltip">Full log of the last run</property>
-            <property name="window_style" />
-            <object class="wxBoxSizer" expanded="true">
-              <property name="minimum_size" />
-              <property name="name">bSizerLogPane</property>
-              <property name="orient">wxVERTICAL</property>
-              <property name="permission">none</property>
-              <object class="sizeritem" expanded="true">
-                <property name="border">2</property>
-                <property name="flag">wxEXPAND|wxALL</property>
-                <property name="proportion">1</property>
-                <object class="wxTextCtrl" expanded="true">
-                  <property name="enabled">1</property>
-                  <property name="hidden">0</property>
-                  <property name="id">wxID_ANY</property>
-                  <property name="maximum_size" />
-                  <property name="minimum_size">400,150</property>
-                  <property name="name">m_log</property>
-                  <property name="permission">public</property>
-                  <property name="style">wxTE_BESTWRAP|wxTE_MULTILINE|wxTE_READONLY</property>
-                  <property name="tooltip" />
-                  <property name="value" />
-                  <property name="window_style" />
                 </object>
               </object>
             </object>
