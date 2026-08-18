@@ -47,6 +47,13 @@ STD_PART = "std:4c0dae4e58984c06b7812642e521e379"
 # 191f82fa… = "TYPE-C-SMD_USB-AMALECONNECTOR", a Std document with `docType` 4: a
 # standalone footprint, with no symbol at all. It must not claim the Symbol tab.
 STD_FOOTPRINT = "std:191f82fa4cdb4362ace6b365bebb2565"
+# C15127 = AO3401A, a Pro part that owns both a symbol and a footprint document.
+# Used to prove that a *failed* footprint render does not move the tab.
+PRO_BOTH = "C15127"
+# 7e897495… = "MAX9814", a 2016 Std upload whose symbol names its footprint
+# ("package": "MAX9814") while EasyEDA publishes no such document and sends no
+# packageDetail. It claims a footprint, so it must not move the tab either.
+STD_DANGLING = "std:7e897495bbaf42c9a1e64c55011a8529"
 
 app = wx.App()
 app.SetAssertMode(wx.APP_ASSERT_SUPPRESS)
@@ -68,15 +75,28 @@ def pump(seconds):
         time.sleep(0.05)
 
 def settle(seconds=45):
-    """Wait for the fetch thread to deliver. The preview is asynchronous now: the
-    handler returns at once and parks a loading note in both panes."""
+    """Wait for the fetch thread to deliver, then for the WebViews to load.
+
+    The preview is asynchronous: the handler returns at once and parks a loading
+    note in both panes, so a fixed sleep can read back a page WebKit has already
+    replaced. Wait for content that is not the loading note.
+    """
     end = time.time() + seconds
 
     while time.time() < end and dialog.m_partTitle.GetLabel().endswith("\u2026"):
         wx.Yield()
         time.sleep(0.05)
 
-    pump(1.2)  # the WebViews still have to load the page they were handed
+    end = min(end, time.time() + 10)
+
+    while time.time() < end:
+        pump(0.25)
+        loaded = [html for html in readPanels().values()
+                  if "Loading" not in html
+                  and ("<svg" in html or "<img" in html or 'class="note"' in html)]
+
+        if len(loaded) == 2:
+            return
 
 # Cleared the first time a simulated click fails to reach the tree; after that
 # the handler is called directly and the click is not retried.
@@ -222,6 +242,8 @@ for name, html in panels.items():
 assert "easyeda.com/component/" in link.GetURL(), f"Std viewer link: {link.GetURL()}"
 assert link.GetLabel() == "Open in EasyEDA Std", f"link label: {link.GetLabel()}"
 
+notebook = dialog.m_previewNotebook
+notebook.SetSelection(0)          # a footprint-only part must pull us off Symbol
 panels = selectRow(STD_FOOTPRINT)
 report("std, footprint", panels)
 # docType 4 is a standalone footprint document: it *is* the footprint and has no
@@ -230,7 +252,6 @@ report("std, footprint", panels)
 assert drawings(panels["footprint"]) == 1, "the footprint pane holds no thumbnail"
 assert drawings(panels["symbol"]) == 0, "a footprint-only document drew a symbol"
 assert 'class="note"' in panels["symbol"], "the symbol pane is blank with no explanation"
-notebook = dialog.m_previewNotebook
 assert notebook.GetPageText(notebook.GetSelection()) == "Footprint", \
     f"a footprint-only part left the user on the {notebook.GetPageText(notebook.GetSelection())} tab"
 params = dict((dialog.m_paramsList.GetItemText(row, 0), dialog.m_paramsList.GetItemText(row, 1))
@@ -238,6 +259,46 @@ params = dict((dialog.m_paramsList.GetItemText(row, 0), dialog.m_paramsList.GetI
 assert params.get("Footprint in KiCad") == "TYPE-C-SMD_USB-AMALECONNECTOR", \
     f"footprint name: {params.get('Footprint in KiCad')!r}"
 assert "Symbol in KiCad" not in params, "a footprint-only document reported a symbol name"
+
+# A part that *has* both documents but whose footprint will not render: the pane
+# has to explain itself, and the tab must stay where the user put it. This is the
+# case that used to jump - the rule looked at what got drawn, so a footprint that
+# failed was indistinguishable from a part with no footprint at all, and browsing
+# footprints kept getting thrown back to Symbol.
+broken = ell.pro_render.footprintSvg
+
+def refuse(*_args, **_kwargs):
+    raise RuntimeError("simulated unreadable footprint document")
+
+ell.pro_render.footprintSvg = refuse
+notebook.SetSelection(1)
+
+try:
+    panels = selectRow(PRO_BOTH)
+finally:
+    ell.pro_render.footprintSvg = broken
+
+report("fp render fails", panels)
+assert notebook.GetPageText(notebook.GetSelection()) == "Footprint", \
+    "an unreadable footprint moved the user off the Footprint tab"
+assert drawings(panels["symbol"]) == 1, "the symbol should still be drawn"
+assert drawings(panels["footprint"]) == 0, "the footprint drew despite failing"
+assert "could not be read" in panels["footprint"], \
+    f"the footprint pane blames missing geometry instead of the failure: {panels['footprint'][:200]}"
+
+# The real report: a Std symbol that names a footprint EasyEDA never published.
+# No packageDetail comes back, so nothing can be drawn - but the part does claim a
+# footprint, and the pane has to name the one it cannot find rather than the tab
+# quietly deciding this is a symbol-only part.
+notebook.SetSelection(1)
+panels = selectRow(STD_DANGLING)
+report("std, dangling", panels)
+assert notebook.GetPageText(notebook.GetSelection()) == "Footprint", \
+    "a named-but-missing footprint moved the user off the Footprint tab"
+assert drawings(panels["symbol"]) == 1, "the symbol thumbnail is missing"
+assert drawings(panels["footprint"]) == 0, "a footprint was drawn for a missing document"
+assert "MAX9814" in panels["footprint"], \
+    f"the footprint pane does not name what is missing: {panels['footprint'][:200]}"
 
 # Selecting a part must cost the UI nothing, and selecting it twice must cost
 # nothing at all: the fetch runs on a thread and its result is cached.

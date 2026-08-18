@@ -760,8 +760,22 @@ class ComponentLoader():
             package = component.get("packageDetail")
 
             if not package or not package.get("dataStr"):
-                info(f"Component '{symbolName}' has no footprint document."
-                     f" A standalone footprint may be listed separately in the search results.")
+                named = params.get("package")
+
+                if named:
+                    # The symbol names its footprint and EasyEDA sent no such
+                    # document. Older user parts often reference a footprint that was
+                    # never published, and then the symbol imports with a Footprint
+                    # field pointing at nothing - silently, until placement.
+                    warning(f"Component '{symbolName}' references footprint '{named}',"
+                            f" which EasyEDA did not return; the symbol will import"
+                            f" without one. Search for '{named}' to see whether it"
+                            f" exists as a part of its own.")
+                else:
+                    info(f"Component '{symbolName}' has no footprint document."
+                         f" A standalone footprint may be listed separately in the"
+                         f" search results.")
+
                 continue
 
             fpDataStr = package["dataStr"]

@@ -102,23 +102,30 @@ def productSvgs(code):
 def proDrawings(symbolUuid, footprintUuid):
     """Symbol and footprint drawings rendered from the Pro documents themselves.
 
-    The fallback for parts EasyEDA never rendered, which is every JLC Public
-    part drawn from scratch instead of imported from LCSC.
-    Returns (symbol, footprint), either of which may be empty.
+    Returns ({kind: markup}, {kind: why it is missing}). "Missing" is not one
+    thing: a document that could not be read is a failure worth saying out loud,
+    while a document that holds no geometry is simply how EasyEDA stores some
+    parts, and the two used to be reported to the user identically.
     """
-    drawings = []
+    drawings, problems = {}, {}
 
-    for uuid, render in ((symbolUuid, pro_render.symbolSvg),
-                         (footprintUuid, pro_render.footprintSvg)):
+    for kind, uuid, render in (("symbol", symbolUuid, pro_render.symbolSvg),
+                               ("footprint", footprintUuid, pro_render.footprintSvg)):
+        drawings[kind] = ""
+
+        if not uuid:
+            problems[kind] = f"This part has no {kind} document."
+            continue
+
         try:
-            drawings.append(render(fetchDataStr(session, uuid)) if uuid else "")
+            drawings[kind] = render(fetchDataStr(session, uuid))
         except Exception as e:
             # A missing pycryptodome or an unreadable document costs the drawing,
             # nothing else.
             warning(f"Could not fetch Pro document {uuid}: {e}")
-            drawings.append("")
+            problems[kind] = f"The {kind} document could not be read: {e}"
 
-    return drawings[0], drawings[1]
+    return drawings, problems
 
 # Results per request, for both APIs.
 SEARCH_PAGE_SIZE = 50
@@ -1015,7 +1022,7 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
                 row = dlg.m_paramsList.InsertItem(dlg.m_paramsList.GetItemCount(), str(key))
                 dlg.m_paramsList.SetItem(row, 1, str(value))
 
-        def showDrawing( view, markup, caption ):
+        def showDrawing( view, markup, caption, problem="" ):
             """Put one drawing in its own panel, or say why it is empty."""
             if not wx_html2_available or not isinstance(view, wx.html2.WebView):
                 # Degraded pane: the static text already explains itself.
@@ -1025,8 +1032,11 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
                 view.SetPage(drawingPage(markup), "")
             else:
                 view.SetPage(drawingPage(
-                    f'<p class="note">No {caption} drawing available.'
-                    ' The EasyEDA document holds no geometry for it.</p>'), "")
+                    f'<p class="note">No {caption} drawing available.<br/>'
+                    # The reason can be an API message: it goes in as text, not markup.
+                    + pro_render._escape(problem or
+                                         "The EasyEDA document holds no geometry for it.")
+                    + '</p>'), "")
 
         # One selection's worth of network work, cached: a part is asked for once per
         # session, so arrow-keying up and down a page of results stops re-fetching.
@@ -1040,7 +1050,11 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
             A failed fetch still has to leave the panes and the parameter table in a
             defined state, so failures are logged and returned as empty markup.
             """
-            data = {"title": "", "attributes": {}, "links": [], "symbol": "", "footprint": ""}
+            # "has" is what the part owns, which is not the same as what could be
+            # drawn: a document that exists but fails to render still means the part
+            # has one, and the tab must not run away from it.
+            data = {"title": "", "attributes": {}, "links": [], "symbol": "", "footprint": "",
+                    "hasSymbol": False, "hasFootprint": False, "problems": {}}
 
             if itemCode.startswith(STD_PREFIX):
                 stdUuid = itemCode[len(STD_PREFIX):]
@@ -1061,16 +1075,32 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
                         # A standalone footprint document *is* the footprint - it has no
                         # symbol whatsoever. Drawing it on the Symbol tab promised a
                         # symbol the library will not contain.
+                        data["hasFootprint"] = True
                         data["footprint"] = imageMarkup(thumbUrl(result, stdUuid))
+                        data["problems"]["symbol"] = "This document is a footprint on its own."
                         kicadNames = {"Footprint in KiCad": attributes.get("package")
                                       or result.get("title", "")}
                     else:
+                        data["hasSymbol"] = True
                         data["symbol"] = imageMarkup(thumbUrl(result, stdUuid))
                         kicadNames = {"Symbol in KiCad": attributes.get("spiceSymbolName")
                                       or result.get("title", "")}
+                        named = attributes.get("package")
+                        # A Std symbol names its footprint in `c_para.package` and the
+                        # document only sometimes comes with it. The part still claims
+                        # a footprint, so the Footprint tab stays worth being on - the
+                        # pane says what is missing instead of the tab running away.
+                        data["hasFootprint"] = bool(named)
+                        data["problems"]["footprint"] = (
+                            f"This symbol references footprint \u201c{named}\u201d,"
+                            " which EasyEDA did not send with it."
+                            " It may not be published as a part of its own."
+                            if named else "This symbol has no footprint attached.")
 
                         if result.get("packageDetail"):
                             package = result["packageDetail"]
+                            data["hasFootprint"] = True
+                            data["problems"].pop("footprint", None)
                             attributes["Footprint"] = package.get("title", "")
                             kicadNames["Footprint in KiCad"] = (
                                 (package.get("dataStr") or {}).get("head", {})
@@ -1116,6 +1146,8 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
                               "Footprint in KiCad": (device.get("footprint") or {}).get("display_title", ""),
                               **attributes}
                 data["attributes"] = attributes
+                data["hasSymbol"] = bool(attributes.get('Symbol'))
+                data["hasFootprint"] = bool(attributes.get('Footprint'))
 
                 if attributes.get('Symbol') or attributes.get('Footprint'):
                     # https://pro.easyeda.com/editor#tab=*!{sym_uuid}(device){dev_uuid}|!{fp_uuid}(device){dev_uuid}
@@ -1132,34 +1164,48 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
                 # failure. Our own render comes first even when EasyEDA has one: only
                 # markup we generate carries the pin/pad/layer metadata the preview
                 # hovers and toggles on, and it is the geometry the importer produces.
-                data["symbol"], data["footprint"] = proDrawings(
+                drawings, problems = proDrawings(
                     attributes.get('Symbol'), attributes.get('Footprint'))
+                data["symbol"], data["footprint"] = drawings["symbol"], drawings["footprint"]
+                data["problems"] = problems
 
                 if not data["symbol"] and not data["footprint"]:
                     # Nothing drawable in the documents: fall back to the flat SVG
                     # EasyEDA renders for LCSC-coded parts.
                     data["symbol"], data["footprint"] = productSvgs(code)
+
+                    for kind in ("symbol", "footprint"):
+                        if data[kind]:
+                            data["problems"].pop(kind, None)
             except Exception as e:
                 traceback.print_exc()
                 warning(f"Failed to load device info for {itemCode}: {e}")
 
             return data
 
+        # The notebook's page order, so the rule below can index it.
+        SYMBOL_PAGE, FOOTPRINT_PAGE = 0, 1
+
         def applyPreview( itemCode, data ):
             """Put one fetched preview on screen."""
             dlg.m_partTitle.SetLabel(data["title"] or itemCode)
             setLinks(*data["links"])
             setParams(data["attributes"])
-            showDrawing(self.symbolView, data["symbol"], "symbol")
-            showDrawing(self.footprintView, data["footprint"], "footprint")
+            showDrawing(self.symbolView, data["symbol"], "symbol",
+                        data["problems"].get("symbol", ""))
+            showDrawing(self.footprintView, data["footprint"], "footprint",
+                        data["problems"].get("footprint", ""))
 
-            # Follow the part: a footprint-only document has nothing on its Symbol
-            # page and would otherwise leave the user staring at an empty one. A part
-            # with both drawings leaves the chosen tab alone.
-            if data["footprint"] and not data["symbol"]:
-                dlg.m_previewNotebook.SetSelection(1)
-            elif data["symbol"] and not data["footprint"]:
-                dlg.m_previewNotebook.SetSelection(0)
+            # Leave the chosen tab alone unless this part cannot fill it at all. Keyed
+            # on the documents the part *owns*, never on what was drawn: a footprint
+            # that failed to render is still a footprint, and browsing footprints used
+            # to get yanked to the Symbol tab by every part whose footprint 404'd.
+            owns = {SYMBOL_PAGE: data["hasSymbol"], FOOTPRINT_PAGE: data["hasFootprint"]}
+            here = dlg.m_previewNotebook.GetSelection()
+            other = FOOTPRINT_PAGE if here == SYMBOL_PAGE else SYMBOL_PAGE
+
+            if not owns.get(here, True) and owns.get(other):
+                dlg.m_previewNotebook.SetSelection(other)
 
             dlg.m_detailsPanel.Layout()
 
@@ -1177,6 +1223,12 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
 
                 while len(previewCache) > 64:
                     previewCache.pop(next(iter(previewCache)))
+
+                # A wx window is falsy once its C++ object is gone: the dialog can be
+                # closed while a fetch is still in flight, and painting into a dead
+                # window is a segfault, not an exception.
+                if not dlg:
+                    return
 
                 # A slower part selected earlier must not overwrite the current one,
                 # but its result is worth keeping: selecting it again is then free.
