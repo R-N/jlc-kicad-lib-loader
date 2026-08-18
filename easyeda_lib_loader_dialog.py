@@ -102,6 +102,52 @@ class EasyEdaLibLoaderDialog ( wx.Dialog ):
 
 		bSizerResults.Add( bSizerResultStatus, 0, wx.EXPAND, 5 )
 
+		bSizerQueue = wx.BoxSizer( wx.VERTICAL )
+
+		bSizerQueueList = wx.BoxSizer( wx.VERTICAL )
+
+		self.m_queueLabel = wx.StaticText( self.m_resultsPanel, wx.ID_ANY, u"Download queue is empty. Double-click a result to add it.", wx.DefaultPosition, wx.DefaultSize, 0 )
+		self.m_queueLabel.Wrap( -1 )
+
+		bSizerQueueList.Add( self.m_queueLabel, 0, wx.LEFT|wx.TOP, 5 )
+
+		self.m_queueList = wx.ListCtrl( self.m_resultsPanel, wx.ID_ANY, wx.DefaultPosition, wx.DefaultSize, wx.LC_HRULES|wx.LC_REPORT )
+		self.m_queueList.SetToolTip( u"Parts that will be downloaded" )
+		self.m_queueList.SetMinSize( wx.Size( 200,110 ) )
+
+		bSizerQueueList.Add( self.m_queueList, 1, wx.EXPAND|wx.ALL, 5 )
+
+
+		bSizerQueue.Add( bSizerQueueList, 1, wx.EXPAND, 5 )
+
+		gSizerQueueButtons = wx.GridSizer( 1, 4, 0, 0 )
+
+		self.m_queueAddBtn = wx.Button( self.m_resultsPanel, wx.ID_ANY, u"Add selected", wx.DefaultPosition, wx.DefaultSize, 0 )
+		self.m_queueAddBtn.SetToolTip( u"Queue the parts selected in the results" )
+
+		gSizerQueueButtons.Add( self.m_queueAddBtn, 0, wx.ALL|wx.EXPAND, 2 )
+
+		self.m_queuePasteBtn = wx.Button( self.m_resultsPanel, wx.ID_ANY, u"Paste codes…", wx.DefaultPosition, wx.DefaultSize, 0 )
+		self.m_queuePasteBtn.SetToolTip( u"Queue LCSC codes or UUIDs, one per line" )
+
+		gSizerQueueButtons.Add( self.m_queuePasteBtn, 0, wx.ALL|wx.EXPAND, 2 )
+
+		self.m_queueRemoveBtn = wx.Button( self.m_resultsPanel, wx.ID_ANY, u"Remove", wx.DefaultPosition, wx.DefaultSize, 0 )
+		self.m_queueRemoveBtn.SetToolTip( u"Remove the selected queue entries" )
+
+		gSizerQueueButtons.Add( self.m_queueRemoveBtn, 0, wx.ALL|wx.EXPAND, 2 )
+
+		self.m_queueClearBtn = wx.Button( self.m_resultsPanel, wx.ID_ANY, u"Clear", wx.DefaultPosition, wx.DefaultSize, 0 )
+		self.m_queueClearBtn.SetToolTip( u"Empty the queue" )
+
+		gSizerQueueButtons.Add( self.m_queueClearBtn, 0, wx.ALL|wx.EXPAND, 2 )
+
+
+		bSizerQueue.Add( gSizerQueueButtons, 0, wx.EXPAND, 5 )
+
+
+		bSizerResults.Add( bSizerQueue, 0, wx.EXPAND|wx.LEFT|wx.RIGHT, 5 )
+
 
 		self.m_resultsPanel.SetSizer( bSizerResults )
 		self.m_resultsPanel.Layout()
@@ -117,25 +163,17 @@ class EasyEdaLibLoaderDialog ( wx.Dialog ):
 		self.m_drawingsPanel = wx.Panel( self.m_splitterInspector, wx.ID_ANY, wx.DefaultPosition, wx.DefaultSize, wx.TAB_TRAVERSAL )
 		bSizerDrawings = wx.BoxSizer( wx.VERTICAL )
 
-		bSizerSymbol = wx.StaticBoxSizer( wx.StaticBox( self.m_drawingsPanel, wx.ID_ANY, u"Symbol" ), wx.VERTICAL )
-
-		self.m_symbolPanel = wx.Panel( bSizerSymbol.GetStaticBox(), wx.ID_ANY, wx.DefaultPosition, wx.DefaultSize, wx.TAB_TRAVERSAL )
+		self.m_previewNotebook = wx.Notebook( self.m_drawingsPanel, wx.ID_ANY, wx.DefaultPosition, wx.DefaultSize, 0 )
+		self.m_symbolPanel = wx.Panel( self.m_previewNotebook, wx.ID_ANY, wx.DefaultPosition, wx.DefaultSize, wx.TAB_TRAVERSAL )
 		self.m_symbolPanel.SetMinSize( wx.Size( 220,120 ) )
 
-		bSizerSymbol.Add( self.m_symbolPanel, 1, wx.EXPAND|wx.ALL, 2 )
-
-
-		bSizerDrawings.Add( bSizerSymbol, 1, wx.EXPAND|wx.ALL, 4 )
-
-		bSizerFootprint = wx.StaticBoxSizer( wx.StaticBox( self.m_drawingsPanel, wx.ID_ANY, u"Footprint" ), wx.VERTICAL )
-
-		self.m_footprintPanel = wx.Panel( bSizerFootprint.GetStaticBox(), wx.ID_ANY, wx.DefaultPosition, wx.DefaultSize, wx.TAB_TRAVERSAL )
+		self.m_previewNotebook.AddPage( self.m_symbolPanel, u"Symbol", True )
+		self.m_footprintPanel = wx.Panel( self.m_previewNotebook, wx.ID_ANY, wx.DefaultPosition, wx.DefaultSize, wx.TAB_TRAVERSAL )
 		self.m_footprintPanel.SetMinSize( wx.Size( 220,120 ) )
 
-		bSizerFootprint.Add( self.m_footprintPanel, 1, wx.EXPAND|wx.ALL, 2 )
+		self.m_previewNotebook.AddPage( self.m_footprintPanel, u"Footprint", False )
 
-
-		bSizerDrawings.Add( bSizerFootprint, 1, wx.EXPAND|wx.ALL, 4 )
+		bSizerDrawings.Add( self.m_previewNotebook, 1, wx.EXPAND|wx.ALL, 4 )
 
 
 		self.m_drawingsPanel.SetSizer( bSizerDrawings )
@@ -144,12 +182,12 @@ class EasyEdaLibLoaderDialog ( wx.Dialog ):
 		self.m_detailsPanel = wx.Panel( self.m_splitterInspector, wx.ID_ANY, wx.DefaultPosition, wx.DefaultSize, wx.TAB_TRAVERSAL )
 		bSizerDetails = wx.BoxSizer( wx.VERTICAL )
 
-		bSizerLinks = wx.BoxSizer( wx.HORIZONTAL )
-
 		self.m_partTitle = wx.StaticText( self.m_detailsPanel, wx.ID_ANY, wx.EmptyString, wx.DefaultPosition, wx.DefaultSize, 0 )
 		self.m_partTitle.Wrap( -1 )
 
-		bSizerLinks.Add( self.m_partTitle, 0, wx.ALIGN_CENTER_VERTICAL|wx.ALL, 5 )
+		bSizerDetails.Add( self.m_partTitle, 0, wx.EXPAND|wx.TOP|wx.LEFT|wx.RIGHT, 5 )
+
+		bSizerLinks = wx.BoxSizer( wx.HORIZONTAL )
 
 
 		bSizerLinks.Add( ( 0, 0), 1, wx.EXPAND, 5 )
@@ -185,52 +223,6 @@ class EasyEdaLibLoaderDialog ( wx.Dialog ):
 		bSizerInspector.Fit( self.m_inspectorPanel )
 		self.m_splitterMain.SplitVertically( self.m_resultsPanel, self.m_inspectorPanel, 700 )
 		bSizerMain.Add( self.m_splitterMain, 1, wx.EXPAND, 5 )
-
-		bSizerQueue = wx.BoxSizer( wx.HORIZONTAL )
-
-		bSizerQueueList = wx.BoxSizer( wx.VERTICAL )
-
-		self.m_queueLabel = wx.StaticText( self, wx.ID_ANY, u"Download queue is empty. Double-click a result to add it.", wx.DefaultPosition, wx.DefaultSize, 0 )
-		self.m_queueLabel.Wrap( -1 )
-
-		bSizerQueueList.Add( self.m_queueLabel, 0, wx.LEFT|wx.TOP, 5 )
-
-		self.m_queueList = wx.ListCtrl( self, wx.ID_ANY, wx.DefaultPosition, wx.DefaultSize, wx.LC_HRULES|wx.LC_REPORT )
-		self.m_queueList.SetToolTip( u"Parts that will be downloaded" )
-		self.m_queueList.SetMinSize( wx.Size( 400,76 ) )
-
-		bSizerQueueList.Add( self.m_queueList, 1, wx.EXPAND|wx.ALL, 5 )
-
-
-		bSizerQueue.Add( bSizerQueueList, 1, wx.EXPAND, 5 )
-
-		gSizerQueueButtons = wx.GridSizer( 2, 2, 0, 0 )
-
-		self.m_queueAddBtn = wx.Button( self, wx.ID_ANY, u"Add selected", wx.DefaultPosition, wx.DefaultSize, 0 )
-		self.m_queueAddBtn.SetToolTip( u"Queue the parts selected in the results" )
-
-		gSizerQueueButtons.Add( self.m_queueAddBtn, 0, wx.ALL|wx.EXPAND, 2 )
-
-		self.m_queuePasteBtn = wx.Button( self, wx.ID_ANY, u"Paste codes…", wx.DefaultPosition, wx.DefaultSize, 0 )
-		self.m_queuePasteBtn.SetToolTip( u"Queue LCSC codes or UUIDs, one per line" )
-
-		gSizerQueueButtons.Add( self.m_queuePasteBtn, 0, wx.ALL|wx.EXPAND, 2 )
-
-		self.m_queueRemoveBtn = wx.Button( self, wx.ID_ANY, u"Remove", wx.DefaultPosition, wx.DefaultSize, 0 )
-		self.m_queueRemoveBtn.SetToolTip( u"Remove the selected queue entries" )
-
-		gSizerQueueButtons.Add( self.m_queueRemoveBtn, 0, wx.ALL|wx.EXPAND, 2 )
-
-		self.m_queueClearBtn = wx.Button( self, wx.ID_ANY, u"Clear", wx.DefaultPosition, wx.DefaultSize, 0 )
-		self.m_queueClearBtn.SetToolTip( u"Empty the queue" )
-
-		gSizerQueueButtons.Add( self.m_queueClearBtn, 0, wx.ALL|wx.EXPAND, 2 )
-
-
-		bSizerQueue.Add( gSizerQueueButtons, 0, wx.ALIGN_BOTTOM, 5 )
-
-
-		bSizerMain.Add( bSizerQueue, 0, wx.EXPAND|wx.LEFT|wx.RIGHT, 5 )
 
 		bSizerLibrary = wx.BoxSizer( wx.HORIZONTAL )
 

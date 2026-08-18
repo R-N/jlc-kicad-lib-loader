@@ -115,7 +115,16 @@ pump(1.0)
 filtered = rows()
 print(f"filter '5.0': {len(filtered)} of {len(found)} | {dlg.m_searchPage.GetLabel()}")
 assert 0 < len(filtered) < len(found), f"the filter did nothing: {len(filtered)}"
-assert all(ell.rowMatches(row, "5.0") for row in filtered), "a non-matching row survived"
+# The grid only shows RESULT_COLUMNS, but a row carries one more cell: the flattened
+# attributes and category tags the filter also searches. Re-checking the match against
+# the truncated visible row would call a legitimate hit on a hidden value a failure,
+# so the full row is looked up by code.
+full = {row[1]: row for row in plugin.searchRows}
+assert all(ell.rowMatches(full[row[1]], "5.0") for row in filtered), \
+    "a non-matching row survived: " + str(next(row for row in filtered
+                                               if not ell.rowMatches(full[row[1]], "5.0")))
+assert any(len(full[row[1]]) > len(ell.RESULT_COLUMNS) for row in filtered), \
+    "rows carry no hidden searchable cell, so the filter cannot see attributes"
 assert "shown" in dlg.m_searchPage.GetLabel(), "the filter does not say how much it hid"
 dlg.m_textCtrlFilter.SetValue("")
 pump(1.0)

@@ -833,6 +833,67 @@ def test_part_queue():
           f"queue does not feed the loader cleanly: {pro}, {std}")
 
 
+def test_queue_aliases():
+    ell = loaderModule()
+
+    queue = ell.PartQueue()
+    queue.addCodes("C6186\nC2040\nstd:4c0dae4e\n")
+
+    # A queued part carries no alias until the user types one into the Alias column.
+    check(queue.aliases() == {}, f"unqueued aliases: {queue.aliases()}")
+    check(all(len(row) == 4 for row in queue.rows()), "a queue row has no alias cell")
+
+    queue.setAlias("C6186", "MY-LDO")
+    check(queue.aliases() == {"C6186": "MY-LDO"}, f"alias not stored: {queue.aliases()}")
+    check(queue.codes() == ["C6186", "C2040", "std:4c0dae4e"],
+          "setting an alias reordered or dropped the queue")
+
+    # Editing the cell again replaces it; clearing it takes the alias away entirely,
+    # rather than filing the footprint under an empty name.
+    queue.setAlias("C6186", "MY-REGULATOR")
+    check(queue.aliases() == {"C6186": "MY-REGULATOR"}, f"alias not replaced: {queue.aliases()}")
+    queue.setAlias("C6186", "   ")
+    check(queue.aliases() == {}, f"a blank alias must not be passed on: {queue.aliases()}")
+
+    # An alias for something not in the queue must not resurrect it.
+    queue.setAlias("C9999", "ghost")
+    check("C9999" not in queue.codes(), "an alias queued a part on its own")
+
+    queue.setAlias("std:4c0dae4e", "BREAKOUT")
+    check(queue.aliases() == {"std:4c0dae4e": "BREAKOUT"}, "a Std part cannot be aliased")
+    queue.remove(["std:4c0dae4e"])
+    check(queue.aliases() == {}, "removing a part left its alias behind")
+
+
+def test_drawing_page():
+    ell = loaderModule()
+
+    # EasyEDA markup really does contain braces (CSS in style attributes, and any
+    # part whose name has one). str.format would raise KeyError on the first of
+    # them and would also need every brace of the pan/zoom script doubled, so the
+    # page is assembled with str.replace. This pins that.
+    body = '<svg style="fill:#48c"><text>{weird} name</text></svg>'
+    page = ell.drawingPage(body)
+
+    check(page.count(body) == 1, "the drawing is not embedded verbatim exactly once")
+    check("__BODY__" not in page, "placeholder left in the page")
+    check(page.count("<svg") == 1, f"page holds {page.count('<svg')} drawings")
+
+    # The pan/zoom script needs both boxes and its own transform origin: the
+    # cursor-anchored zoom maths is wrong against any other origin.
+    check('id="vp"' in page and 'id="cv"' in page, "viewport or canvas box missing")
+    check("transform-origin: 0 0" in page, "canvas has no top-left transform origin")
+    check("addEventListener('wheel'" in page and "addEventListener('mousedown'" in page,
+          "pan/zoom handlers missing")
+    check("dblclick" in page, "no way to reset the view")
+    # The CSS survived substitution rather than being eaten as format fields.
+    check("height: 100%" in page and "align-items: center" in page, "stylesheet mangled")
+
+    empty = ell.drawingPage('<p class="note">nothing</p>')
+    check(empty.count("<svg") == 0 and 'class="note"' in empty,
+          "the empty-document page must carry a note and no drawing")
+
+
 SECTIONS = [
     ("pro_render, real document", test_real_document, ()),
     ("pro_render, axis and units", test_y_axis_and_units, ()),
@@ -845,11 +906,13 @@ SECTIONS = [
     ("easyeda_lib_loader, result rows", test_result_rows, ("requests", "pcbnew", "wx")),
     ("easyeda_lib_loader, filter and sort", test_filter_and_sort, ("requests", "pcbnew", "wx")),
     ("easyeda_lib_loader, part queue", test_part_queue, ("requests", "pcbnew", "wx")),
+    ("easyeda_lib_loader, queue aliases", test_queue_aliases, ("requests", "pcbnew", "wx")),
     ("component_loader, library index", test_library_index, ("requests", "pcbnew")),
     ("component_loader, part aliases", test_part_aliases, ("requests", "pcbnew")),
     ("component_loader, alias cleanup", test_alias_runaway_cleanup, ("requests", "pcbnew")),
     ("config_manager, library tables", test_library_tables, ("wx",)),
     ("component_loader, pro result", test_pro_result, ("requests", "pcbnew")),
+    ("easyeda_lib_loader, drawing page", test_drawing_page, ("requests", "pcbnew", "wx")),
 ]
 
 

@@ -302,6 +302,149 @@
                       </object>
                     </object>
                   </object>
+                  <object class="sizeritem" expanded="true">
+                    <property name="border">5</property>
+                    <property name="flag">wxEXPAND|wxLEFT|wxRIGHT</property>
+                    <property name="proportion">0</property>
+                    <object class="wxBoxSizer" expanded="true">
+                      <property name="minimum_size" />
+                      <property name="name">bSizerQueue</property>
+                      <property name="orient">wxVERTICAL</property>
+                      <property name="permission">none</property>
+                      <object class="sizeritem" expanded="true">
+                        <property name="border">5</property>
+                        <property name="flag">wxEXPAND</property>
+                        <property name="proportion">1</property>
+                        <object class="wxBoxSizer" expanded="true">
+                          <property name="minimum_size" />
+                          <property name="name">bSizerQueueList</property>
+                          <property name="orient">wxVERTICAL</property>
+                          <property name="permission">none</property>
+                          <object class="sizeritem" expanded="true">
+                            <property name="border">5</property>
+                            <property name="flag">wxLEFT|wxTOP</property>
+                            <property name="proportion">0</property>
+                            <object class="wxStaticText" expanded="true">
+                              <property name="enabled">1</property>
+                              <property name="hidden">0</property>
+                              <property name="id">wxID_ANY</property>
+                              <property name="label">Download queue is empty. Double-click a result to add it.</property>
+                              <property name="name">m_queueLabel</property>
+                              <property name="permission">public</property>
+                              <property name="wrap">-1</property>
+                            </object>
+                          </object>
+                          <object class="sizeritem" expanded="true">
+                            <property name="border">5</property>
+                            <property name="flag">wxEXPAND|wxALL</property>
+                            <property name="proportion">1</property>
+                            <object class="wxListCtrl" expanded="true">
+                              <property name="enabled">1</property>
+                              <property name="hidden">0</property>
+                              <property name="id">wxID_ANY</property>
+                              <property name="maximum_size" />
+                              <property name="minimum_size">200,110</property>
+                              <property name="name">m_queueList</property>
+                              <property name="permission">public</property>
+                              <property name="style">wxLC_HRULES|wxLC_REPORT</property>
+                              <property name="tooltip">Parts that will be downloaded</property>
+                              <property name="window_style" />
+                            </object>
+                          </object>
+                        </object>
+                      </object>
+                      <object class="sizeritem" expanded="true">
+                        <property name="border">5</property>
+                        <property name="flag">wxEXPAND</property>
+                        <property name="proportion">0</property>
+                        <object class="wxGridSizer" expanded="true">
+                          <property name="cols">4</property>
+                          <property name="hgap">0</property>
+                          <property name="minimum_size" />
+                          <property name="name">gSizerQueueButtons</property>
+                          <property name="permission">none</property>
+                          <property name="rows">1</property>
+                          <property name="vgap">0</property>
+                          <object class="sizeritem" expanded="true">
+                            <property name="border">2</property>
+                            <property name="flag">wxALL|wxEXPAND</property>
+                            <property name="proportion">0</property>
+                            <object class="wxButton" expanded="true">
+                              <property name="default">0</property>
+                              <property name="enabled">1</property>
+                              <property name="hidden">0</property>
+                              <property name="id">wxID_ANY</property>
+                              <property name="label">Add selected</property>
+                              <property name="maximum_size" />
+                              <property name="minimum_size" />
+                              <property name="name">m_queueAddBtn</property>
+                              <property name="permission">public</property>
+                              <property name="style" />
+                              <property name="tooltip">Queue the parts selected in the results</property>
+                              <property name="window_style" />
+                            </object>
+                          </object>
+                          <object class="sizeritem" expanded="true">
+                            <property name="border">2</property>
+                            <property name="flag">wxALL|wxEXPAND</property>
+                            <property name="proportion">0</property>
+                            <object class="wxButton" expanded="true">
+                              <property name="default">0</property>
+                              <property name="enabled">1</property>
+                              <property name="hidden">0</property>
+                              <property name="id">wxID_ANY</property>
+                              <property name="label">Paste codes…</property>
+                              <property name="maximum_size" />
+                              <property name="minimum_size" />
+                              <property name="name">m_queuePasteBtn</property>
+                              <property name="permission">public</property>
+                              <property name="style" />
+                              <property name="tooltip">Queue LCSC codes or UUIDs, one per line</property>
+                              <property name="window_style" />
+                            </object>
+                          </object>
+                          <object class="sizeritem" expanded="true">
+                            <property name="border">2</property>
+                            <property name="flag">wxALL|wxEXPAND</property>
+                            <property name="proportion">0</property>
+                            <object class="wxButton" expanded="true">
+                              <property name="default">0</property>
+                              <property name="enabled">1</property>
+                              <property name="hidden">0</property>
+                              <property name="id">wxID_ANY</property>
+                              <property name="label">Remove</property>
+                              <property name="maximum_size" />
+                              <property name="minimum_size" />
+                              <property name="name">m_queueRemoveBtn</property>
+                              <property name="permission">public</property>
+                              <property name="style" />
+                              <property name="tooltip">Remove the selected queue entries</property>
+                              <property name="window_style" />
+                            </object>
+                          </object>
+                          <object class="sizeritem" expanded="true">
+                            <property name="border">2</property>
+                            <property name="flag">wxALL|wxEXPAND</property>
+                            <property name="proportion">0</property>
+                            <object class="wxButton" expanded="true">
+                              <property name="default">0</property>
+                              <property name="enabled">1</property>
+                              <property name="hidden">0</property>
+                              <property name="id">wxID_ANY</property>
+                              <property name="label">Clear</property>
+                              <property name="maximum_size" />
+                              <property name="minimum_size" />
+                              <property name="name">m_queueClearBtn</property>
+                              <property name="permission">public</property>
+                              <property name="style" />
+                              <property name="tooltip">Empty the queue</property>
+                              <property name="window_style" />
+                            </object>
+                          </object>
+                        </object>
+                      </object>
+                    </object>
+                  </object>
                 </object>
               </object>
             </object>
@@ -363,62 +506,53 @@
                               <property name="border">4</property>
                               <property name="flag">wxEXPAND|wxALL</property>
                               <property name="proportion">1</property>
-                              <object class="wxStaticBoxSizer" expanded="true">
+                              <object class="wxNotebook" expanded="true">
+                                <property name="bitmapsize" />
+                                <property name="enabled">1</property>
+                                <property name="hidden">0</property>
                                 <property name="id">wxID_ANY</property>
-                                <property name="label">Symbol</property>
+                                <property name="maximum_size" />
                                 <property name="minimum_size" />
-                                <property name="name">bSizerSymbol</property>
-                                <property name="orient">wxVERTICAL</property>
-                                <property name="parent">1</property>
-                                <property name="permission">none</property>
-                                <object class="sizeritem" expanded="true">
-                                  <property name="border">2</property>
-                                  <property name="flag">wxEXPAND|wxALL</property>
-                                  <property name="proportion">1</property>
-                                  <object class="wxPanel" expanded="true">
-                                    <property name="enabled">1</property>
-                                    <property name="hidden">0</property>
-                                    <property name="id">wxID_ANY</property>
-                                    <property name="maximum_size" />
-                                    <property name="minimum_size">220,120</property>
-                                    <property name="name">m_symbolPanel</property>
-                                    <property name="permission">public</property>
-                                    <property name="subclass">; ; forward_declare</property>
-                                    <property name="tooltip" />
-                                    <property name="window_style">wxTAB_TRAVERSAL</property>
-                                  </object>
-                                </object>
-                              </object>
-                            </object>
-                            <object class="sizeritem" expanded="true">
-                              <property name="border">4</property>
-                              <property name="flag">wxEXPAND|wxALL</property>
-                              <property name="proportion">1</property>
-                              <object class="wxStaticBoxSizer" expanded="true">
-                                <property name="id">wxID_ANY</property>
-                                <property name="label">Footprint</property>
-                                <property name="minimum_size" />
-                                <property name="name">bSizerFootprint</property>
-                                <property name="orient">wxVERTICAL</property>
-                                <property name="parent">1</property>
-                                <property name="permission">none</property>
-                                <object class="sizeritem" expanded="true">
-                                  <property name="border">2</property>
-                                  <property name="flag">wxEXPAND|wxALL</property>
-                                  <property name="proportion">1</property>
-                                  <object class="wxPanel" expanded="true">
-                                    <property name="enabled">1</property>
-                                    <property name="hidden">0</property>
-                                    <property name="id">wxID_ANY</property>
-                                    <property name="maximum_size" />
-                                    <property name="minimum_size">220,120</property>
-                                    <property name="name">m_footprintPanel</property>
-                                    <property name="permission">public</property>
-                                    <property name="subclass">; ; forward_declare</property>
-                                    <property name="tooltip" />
-                                    <property name="window_style">wxTAB_TRAVERSAL</property>
-                                  </object>
-                                </object>
+                                <property name="name">m_previewNotebook</property>
+                                <property name="permission">public</property>
+                                <property name="style" />
+                                <property name="subclass">; ; forward_declare</property>
+                                <property name="tooltip" />
+                                <property name="window_style" />
+              <object class="notebookpage" expanded="true">
+                <property name="bitmap" />
+                <property name="label">Symbol</property>
+                <property name="select">1</property>
+                <object class="wxPanel" expanded="true">
+                  <property name="enabled">1</property>
+                  <property name="hidden">0</property>
+                  <property name="id">wxID_ANY</property>
+                  <property name="maximum_size" />
+                  <property name="minimum_size">220,120</property>
+                  <property name="name">m_symbolPanel</property>
+                  <property name="permission">public</property>
+                  <property name="subclass">; ; forward_declare</property>
+                  <property name="tooltip" />
+                  <property name="window_style">wxTAB_TRAVERSAL</property>
+                </object>
+              </object>
+              <object class="notebookpage" expanded="true">
+                <property name="bitmap" />
+                <property name="label">Footprint</property>
+                <property name="select">0</property>
+                <object class="wxPanel" expanded="true">
+                  <property name="enabled">1</property>
+                  <property name="hidden">0</property>
+                  <property name="id">wxID_ANY</property>
+                  <property name="maximum_size" />
+                  <property name="minimum_size">220,120</property>
+                  <property name="name">m_footprintPanel</property>
+                  <property name="permission">public</property>
+                  <property name="subclass">; ; forward_declare</property>
+                  <property name="tooltip" />
+                  <property name="window_style">wxTAB_TRAVERSAL</property>
+                </object>
+              </object>
                               </object>
                             </object>
                           </object>
@@ -443,6 +577,20 @@
                             <property name="permission">none</property>
                             <object class="sizeritem" expanded="true">
                               <property name="border">5</property>
+                              <property name="flag">wxEXPAND|wxTOP|wxLEFT|wxRIGHT</property>
+                              <property name="proportion">0</property>
+                              <object class="wxStaticText" expanded="true">
+                                <property name="enabled">1</property>
+                                <property name="hidden">0</property>
+                                <property name="id">wxID_ANY</property>
+                                <property name="label" />
+                                <property name="name">m_partTitle</property>
+                                <property name="permission">public</property>
+                                <property name="wrap">-1</property>
+                              </object>
+                            </object>
+                            <object class="sizeritem" expanded="true">
+                              <property name="border">5</property>
                               <property name="flag">wxEXPAND</property>
                               <property name="proportion">0</property>
                               <object class="wxBoxSizer" expanded="true">
@@ -450,20 +598,6 @@
                                 <property name="name">bSizerLinks</property>
                                 <property name="orient">wxHORIZONTAL</property>
                                 <property name="permission">none</property>
-                                <object class="sizeritem" expanded="true">
-                                  <property name="border">5</property>
-                                  <property name="flag">wxALIGN_CENTER_VERTICAL|wxALL</property>
-                                  <property name="proportion">0</property>
-                                  <object class="wxStaticText" expanded="true">
-                                    <property name="enabled">1</property>
-                                    <property name="hidden">0</property>
-                                    <property name="id">wxID_ANY</property>
-                                    <property name="label" />
-                                    <property name="name">m_partTitle</property>
-                                    <property name="permission">public</property>
-                                    <property name="wrap">-1</property>
-                                  </object>
-                                </object>
                                 <object class="sizeritem" expanded="true">
                                   <property name="border">5</property>
                                   <property name="flag">wxEXPAND</property>
@@ -554,149 +688,6 @@
                         </object>
                       </object>
                     </object>
-                  </object>
-                </object>
-              </object>
-            </object>
-          </object>
-        </object>
-        <object class="sizeritem" expanded="true">
-          <property name="border">5</property>
-          <property name="flag">wxEXPAND|wxLEFT|wxRIGHT</property>
-          <property name="proportion">0</property>
-          <object class="wxBoxSizer" expanded="true">
-            <property name="minimum_size" />
-            <property name="name">bSizerQueue</property>
-            <property name="orient">wxHORIZONTAL</property>
-            <property name="permission">none</property>
-            <object class="sizeritem" expanded="true">
-              <property name="border">5</property>
-              <property name="flag">wxEXPAND</property>
-              <property name="proportion">1</property>
-              <object class="wxBoxSizer" expanded="true">
-                <property name="minimum_size" />
-                <property name="name">bSizerQueueList</property>
-                <property name="orient">wxVERTICAL</property>
-                <property name="permission">none</property>
-                <object class="sizeritem" expanded="true">
-                  <property name="border">5</property>
-                  <property name="flag">wxLEFT|wxTOP</property>
-                  <property name="proportion">0</property>
-                  <object class="wxStaticText" expanded="true">
-                    <property name="enabled">1</property>
-                    <property name="hidden">0</property>
-                    <property name="id">wxID_ANY</property>
-                    <property name="label">Download queue is empty. Double-click a result to add it.</property>
-                    <property name="name">m_queueLabel</property>
-                    <property name="permission">public</property>
-                    <property name="wrap">-1</property>
-                  </object>
-                </object>
-                <object class="sizeritem" expanded="true">
-                  <property name="border">5</property>
-                  <property name="flag">wxEXPAND|wxALL</property>
-                  <property name="proportion">1</property>
-                  <object class="wxListCtrl" expanded="true">
-                    <property name="enabled">1</property>
-                    <property name="hidden">0</property>
-                    <property name="id">wxID_ANY</property>
-                    <property name="maximum_size" />
-                    <property name="minimum_size">400,76</property>
-                    <property name="name">m_queueList</property>
-                    <property name="permission">public</property>
-                    <property name="style">wxLC_HRULES|wxLC_REPORT</property>
-                    <property name="tooltip">Parts that will be downloaded</property>
-                    <property name="window_style" />
-                  </object>
-                </object>
-              </object>
-            </object>
-            <object class="sizeritem" expanded="true">
-              <property name="border">5</property>
-              <property name="flag">wxALIGN_BOTTOM</property>
-              <property name="proportion">0</property>
-              <object class="wxGridSizer" expanded="true">
-                <property name="cols">2</property>
-                <property name="hgap">0</property>
-                <property name="minimum_size" />
-                <property name="name">gSizerQueueButtons</property>
-                <property name="permission">none</property>
-                <property name="rows">2</property>
-                <property name="vgap">0</property>
-                <object class="sizeritem" expanded="true">
-                  <property name="border">2</property>
-                  <property name="flag">wxALL|wxEXPAND</property>
-                  <property name="proportion">0</property>
-                  <object class="wxButton" expanded="true">
-                    <property name="default">0</property>
-                    <property name="enabled">1</property>
-                    <property name="hidden">0</property>
-                    <property name="id">wxID_ANY</property>
-                    <property name="label">Add selected</property>
-                    <property name="maximum_size" />
-                    <property name="minimum_size" />
-                    <property name="name">m_queueAddBtn</property>
-                    <property name="permission">public</property>
-                    <property name="style" />
-                    <property name="tooltip">Queue the parts selected in the results</property>
-                    <property name="window_style" />
-                  </object>
-                </object>
-                <object class="sizeritem" expanded="true">
-                  <property name="border">2</property>
-                  <property name="flag">wxALL|wxEXPAND</property>
-                  <property name="proportion">0</property>
-                  <object class="wxButton" expanded="true">
-                    <property name="default">0</property>
-                    <property name="enabled">1</property>
-                    <property name="hidden">0</property>
-                    <property name="id">wxID_ANY</property>
-                    <property name="label">Paste codes…</property>
-                    <property name="maximum_size" />
-                    <property name="minimum_size" />
-                    <property name="name">m_queuePasteBtn</property>
-                    <property name="permission">public</property>
-                    <property name="style" />
-                    <property name="tooltip">Queue LCSC codes or UUIDs, one per line</property>
-                    <property name="window_style" />
-                  </object>
-                </object>
-                <object class="sizeritem" expanded="true">
-                  <property name="border">2</property>
-                  <property name="flag">wxALL|wxEXPAND</property>
-                  <property name="proportion">0</property>
-                  <object class="wxButton" expanded="true">
-                    <property name="default">0</property>
-                    <property name="enabled">1</property>
-                    <property name="hidden">0</property>
-                    <property name="id">wxID_ANY</property>
-                    <property name="label">Remove</property>
-                    <property name="maximum_size" />
-                    <property name="minimum_size" />
-                    <property name="name">m_queueRemoveBtn</property>
-                    <property name="permission">public</property>
-                    <property name="style" />
-                    <property name="tooltip">Remove the selected queue entries</property>
-                    <property name="window_style" />
-                  </object>
-                </object>
-                <object class="sizeritem" expanded="true">
-                  <property name="border">2</property>
-                  <property name="flag">wxALL|wxEXPAND</property>
-                  <property name="proportion">0</property>
-                  <object class="wxButton" expanded="true">
-                    <property name="default">0</property>
-                    <property name="enabled">1</property>
-                    <property name="hidden">0</property>
-                    <property name="id">wxID_ANY</property>
-                    <property name="label">Clear</property>
-                    <property name="maximum_size" />
-                    <property name="minimum_size" />
-                    <property name="name">m_queueClearBtn</property>
-                    <property name="permission">public</property>
-                    <property name="style" />
-                    <property name="tooltip">Empty the queue</property>
-                    <property name="window_style" />
                   </object>
                 </object>
               </object>

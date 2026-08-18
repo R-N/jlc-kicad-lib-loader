@@ -111,18 +111,73 @@ def proDrawings(symbolUuid, footprintUuid):
 # Results per request, for both APIs.
 SEARCH_PAGE_SIZE = 50
 
-# One drawing, centred and scaled to its panel. Each drawing gets its own panel, so
-# the page holds exactly one and needs no layout of its own.
+# One drawing, centred and scaled to its panel, then pannable and zoomable. Each
+# drawing gets its own panel, so the page holds exactly one and needs no layout of
+# its own. Substituted with str.replace, not str.format: the script below is mostly
+# braces, and doubling every one of them for format() is a bug farm.
 DRAWING_PAGE = """<!DOCTYPE html><html><head><meta charset="utf-8"><style>
-    html, body {{ height: 100%; margin: 0; }}
-    body {{ display: flex; align-items: center; justify-content: center;
-            font-family: sans-serif; background: #ffffff; }}
+    html, body { height: 100%; margin: 0; overflow: hidden; }
+    body { font-family: sans-serif; background: #ffffff; }
+    /* The viewport clips and takes the input; the canvas is what gets transformed. */
+    #vp { position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+          overflow: hidden; cursor: grab; }
+    #vp.grabbing { cursor: grabbing; }
+    #cv { position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+          transform-origin: 0 0;
+          display: flex; align-items: center; justify-content: center; }
     /* Fill the panel: max-width alone only ever shrinks, so a 220px drawing stayed
        a stamp in a 500px panel. A viewBox keeps the aspect ratio. */
-    svg {{ width: 100%; height: 100%; }}
-    img {{ width: 100%; height: 100%; object-fit: contain; }}
-    .note {{ color: #666; font-size: 90%; text-align: center; margin: 0 12px; }}
-</style></head><body>{body}</body></html>"""
+    svg { width: 100%; height: 100%; }
+    img { width: 100%; height: 100%; object-fit: contain; }
+    .note { color: #666; font-size: 90%; text-align: center; margin: 0 12px; }
+    #hint { position: absolute; right: 6px; bottom: 4px; color: #aaa;
+            font-size: 10px; pointer-events: none; user-select: none; }
+</style></head><body>
+<div id="vp"><div id="cv">__BODY__</div></div>
+<div id="hint">scroll: zoom &middot; drag: pan &middot; double-click: reset</div>
+<script>
+(function () {
+    var vp = document.getElementById('vp'), cv = document.getElementById('cv');
+    var k = 1, x = 0, y = 0, down = false, ox = 0, oy = 0;
+
+    function apply() {
+        cv.style.transform = 'translate(' + x + 'px,' + y + 'px) scale(' + k + ')';
+    }
+
+    vp.addEventListener('wheel', function (e) {
+        e.preventDefault();
+        var r = vp.getBoundingClientRect();
+        var mx = e.clientX - r.left, my = e.clientY - r.top;
+        // Clamp first, then derive the ratio actually applied, or the pan
+        // correction drifts once zoom is pinned at a stop.
+        var nk = Math.min(40, Math.max(0.2, k * Math.exp(-e.deltaY * 0.0015)));
+        var f = nk / k;
+        x = mx - f * (mx - x);
+        y = my - f * (my - y);
+        k = nk;
+        apply();
+    }, { passive: false });
+
+    vp.addEventListener('mousedown', function (e) {
+        down = true; ox = e.clientX - x; oy = e.clientY - y;
+        vp.className = 'grabbing'; e.preventDefault();
+    });
+
+    // On window, not the viewport: a drag that leaves the panel must still track
+    // and must still end, or the drawing stays glued to the pointer.
+    window.addEventListener('mousemove', function (e) {
+        if (down) { x = e.clientX - ox; y = e.clientY - oy; apply(); }
+    });
+
+    window.addEventListener('mouseup', function () { down = false; vp.className = ''; });
+    vp.addEventListener('dblclick', function () { k = 1; x = 0; y = 0; apply(); });
+})();
+</script></body></html>"""
+
+
+def drawingPage( body ):
+    """The drawing page holding one drawing. str.replace, not format: see above."""
+    return DRAWING_PAGE.replace("__BODY__", body)
 
 # Searches behind each entry of m_libSourceChoice, filled in createDialog because
 # the search functions close over the dialog.
@@ -806,11 +861,11 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
                 return
 
             if markup:
-                view.SetPage(DRAWING_PAGE.format(body=markup), "")
+                view.SetPage(drawingPage(markup), "")
             else:
-                view.SetPage(DRAWING_PAGE.format(
-                    body=f'<p class="note">No {caption} drawing available.'
-                         ' The EasyEDA document holds no geometry for it.</p>'), "")
+                view.SetPage(drawingPage(
+                    f'<p class="note">No {caption} drawing available.'
+                    ' The EasyEDA document holds no geometry for it.</p>'), "")
 
         def onSearchItemSelected( event ):
             itemCode = dlg.m_searchResultsTree.GetItemText(event.GetItem(), 1)
