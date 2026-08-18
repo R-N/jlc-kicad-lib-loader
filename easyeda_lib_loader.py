@@ -33,7 +33,19 @@ except Exception:
 
 DEFAULT_USER_AGENT = f"jlc-kicad-lib-loader/{__version__}"
 
-session = requests.Session()
+# EasyEDA answers in well under a second when it answers at all, and hangs
+# indefinitely when it does not. Without a deadline one unlucky request wedges
+# whichever thread made it - which used to be the UI thread.
+HTTP_TIMEOUT = (10, 30)  # (connect, read), seconds
+
+class TimeoutSession(requests.Session):
+    """A session that refuses to wait forever, unless a caller insists."""
+
+    def request(self, *args, **kwargs):
+        kwargs.setdefault("timeout", HTTP_TIMEOUT)
+        return super().request(*args, **kwargs)
+
+session = TimeoutSession()
 session.headers.update({"User-Agent": DEFAULT_USER_AGENT})
 
 def isUuid(value):
@@ -1016,15 +1028,24 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
                     f'<p class="note">No {caption} drawing available.'
                     ' The EasyEDA document holds no geometry for it.</p>'), "")
 
-        def onSearchItemSelected( event ):
-            itemCode = dlg.m_searchResultsTree.GetItemText(event.GetItem(), 1)
-            attributes = {}
-            preview_title = ""
-            preview_symbol = ""
-            preview_footprint = ""
+        # One selection's worth of network work, cached: a part is asked for once per
+        # session, so arrow-keying up and down a page of results stops re-fetching.
+        previewCache = {}
+        previewSeq = [0]
+        LOADING_NOTE = '<p class="note">Loading\u2026</p>'
+
+        def fetchPreview( itemCode ):
+            """Everything one preview needs. Runs on a worker thread, never raises.
+
+            A failed fetch still has to leave the panes and the parameter table in a
+            defined state, so failures are logged and returned as empty markup.
+            """
+            data = {"title": "", "attributes": {}, "links": [], "symbol": "", "footprint": ""}
 
             if itemCode.startswith(STD_PREFIX):
                 stdUuid = itemCode[len(STD_PREFIX):]
+                data["links"] = [("Open in EasyEDA Std",
+                                  f"https://easyeda.com/component/{stdUuid}")]
 
                 try:
                     comp_info = session.get(STD_COMPONENT_URL.format(uuid=stdUuid))
@@ -1032,97 +1053,150 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
                     debug("std component info: " + json.dumps(comp_info.json(), indent=4))
                     result = comp_info.json()["result"]
 
-                    attributes = dict((result.get("dataStr") or {}).get("head", {}).get("c_para") or {})
-                    preview_title = result.get("title", "")
-                    preview_symbol = imageMarkup(thumbUrl(result, stdUuid))
-                    kicadNames = {"Symbol in KiCad": attributes.get("spiceSymbolName")
-                                  or result.get("title", "")}
+                    head = (result.get("dataStr") or {}).get("head") or {}
+                    attributes = dict(head.get("c_para") or {})
+                    data["title"] = result.get("title", "")
 
-                    if result.get("packageDetail"):
-                        package = result["packageDetail"]
-                        attributes["Footprint"] = package.get("title", "")
-                        kicadNames["Footprint in KiCad"] = (
-                            (package.get("dataStr") or {}).get("head", {})
-                            .get("c_para", {}).get("package") or package.get("title", ""))
-                        preview_footprint = imageMarkup(thumbUrl(package, package.get("uuid")))
+                    if str(head.get("docType")) == "4":
+                        # A standalone footprint document *is* the footprint - it has no
+                        # symbol whatsoever. Drawing it on the Symbol tab promised a
+                        # symbol the library will not contain.
+                        data["footprint"] = imageMarkup(thumbUrl(result, stdUuid))
+                        kicadNames = {"Footprint in KiCad": attributes.get("package")
+                                      or result.get("title", "")}
+                    else:
+                        data["symbol"] = imageMarkup(thumbUrl(result, stdUuid))
+                        kicadNames = {"Symbol in KiCad": attributes.get("spiceSymbolName")
+                                      or result.get("title", "")}
 
-                    attributes = {**kicadNames, **attributes}
+                        if result.get("packageDetail"):
+                            package = result["packageDetail"]
+                            attributes["Footprint"] = package.get("title", "")
+                            kicadNames["Footprint in KiCad"] = (
+                                (package.get("dataStr") or {}).get("head", {})
+                                .get("c_para", {}).get("package") or package.get("title", ""))
+                            data["footprint"] = imageMarkup(thumbUrl(package, package.get("uuid")))
+
+                    data["attributes"] = {**kicadNames, **attributes}
                 except Exception as e:
                     traceback.print_exc()
                     warning(f"Failed to load component info for {stdUuid}: {e}")
 
-                setLinks(("Open in EasyEDA Std", f"https://easyeda.com/component/{stdUuid}"))
-            else:
-                easyedaLink = None
-                links = []
+                return data
 
-                try:
-                    # The device endpoint takes a uuid; a JLC System row carries an LCSC
-                    # code, which resolves through the same call the download path uses.
-                    deviceUuid = itemCode
+            try:
+                # The device endpoint takes a uuid; a JLC System row carries an LCSC
+                # code, which resolves through the same call the download path uses.
+                deviceUuid = itemCode
 
-                    if re.fullmatch(r"C\d+", itemCode):
-                        byCode = session.post(PRO_SEARCH_BY_CODES_URL, data={"codes[]": [itemCode]})
-                        byCode.raise_for_status()
-                        entries = byCode.json().get("result") or []
+                if re.fullmatch(r"C\d+", itemCode):
+                    byCode = session.post(PRO_SEARCH_BY_CODES_URL, data={"codes[]": [itemCode]})
+                    byCode.raise_for_status()
+                    entries = byCode.json().get("result") or []
 
-                        if not entries:
-                            raise Exception(f"No EasyEDA Pro device for {itemCode}")
+                    if not entries:
+                        raise Exception(f"No EasyEDA Pro device for {itemCode}")
 
-                        deviceUuid = entries[0]["uuid"]
+                    deviceUuid = entries[0]["uuid"]
 
-                    dev_info = session.get(PRO_DEVICE_URL.format(uuid=deviceUuid))
-                    dev_info.raise_for_status()
-                    debug("device info: " + json.dumps(dev_info.json(), indent=4))
-                    device = proResult(dev_info.json())
-                    attributes = dict(device["attributes"])
-                    preview_title = device.get('display_title') or device.get('title', '')
-                    code = attributes.get('Supplier Part', '')
+                dev_info = session.get(PRO_DEVICE_URL.format(uuid=deviceUuid))
+                dev_info.raise_for_status()
+                debug("device info: " + json.dumps(dev_info.json(), indent=4))
+                device = proResult(dev_info.json())
+                attributes = dict(device["attributes"])
+                data["title"] = device.get('display_title') or device.get('title', '')
+                code = attributes.get('Supplier Part', '')
 
-                    # First, because they are what a person needs and cannot guess: KiCad
-                    # names a symbol after its symbol document and a footprint after its
-                    # footprint document, and neither is the part number. One SOT-23
-                    # footprint document is shared by hundreds of parts, so searching
-                    # pcbnew for "AO3401A" finds nothing.
-                    attributes = {"Symbol in KiCad": (device.get("symbol") or {}).get("display_title", ""),
-                                  "Footprint in KiCad": (device.get("footprint") or {}).get("display_title", ""),
-                                  **attributes}
+                # First, because they are what a person needs and cannot guess: KiCad
+                # names a symbol after its symbol document and a footprint after its
+                # footprint document, and neither is the part number. One SOT-23
+                # footprint document is shared by hundreds of parts, so searching
+                # pcbnew for "AO3401A" finds nothing.
+                attributes = {"Symbol in KiCad": (device.get("symbol") or {}).get("display_title", ""),
+                              "Footprint in KiCad": (device.get("footprint") or {}).get("display_title", ""),
+                              **attributes}
+                data["attributes"] = attributes
 
-                    if attributes.get('Symbol') or attributes.get('Footprint'):
-                        # https://pro.easyeda.com/editor#tab=*!{sym_uuid}(device){dev_uuid}|!{fp_uuid}(device){dev_uuid}
-                        tabList = [f"!{attributes[key]}(device){device['uuid']}"
-                                   for key in ("Symbol", "Footprint") if attributes.get(key)]
-                        easyedaLink = f"https://pro.easyeda.com/editor#tab=*{'|'.join(tabList)}"
+                if attributes.get('Symbol') or attributes.get('Footprint'):
+                    # https://pro.easyeda.com/editor#tab=*!{sym_uuid}(device){dev_uuid}|!{fp_uuid}(device){dev_uuid}
+                    tabList = [f"!{attributes[key]}(device){device['uuid']}"
+                               for key in ("Symbol", "Footprint") if attributes.get(key)]
+                    data["links"].append(("Open in EasyEDA Pro",
+                                          f"https://pro.easyeda.com/editor#tab=*{'|'.join(tabList)}"))
 
-                    if easyedaLink:
-                        links.append(("Open in EasyEDA Pro", easyedaLink))
+                if re.fullmatch(r"C\d+", code or ""):
+                    data["links"].append(("JLCPCB", f"https://jlcpcb.com/partdetail/{code}"))
+                    data["links"].append(("LCSC", f"https://www.lcsc.com/product-detail/{code}.html"))
 
-                    if re.fullmatch(r"C\d+", code or ""):
-                        links.append(("JLCPCB", f"https://jlcpcb.com/partdetail/{code}"))
-                        links.append(("LCSC", f"https://www.lcsc.com/product-detail/{code}.html"))
+                # Last: the drawings are a bonus, the links above must survive their
+                # failure. Our own render comes first even when EasyEDA has one: only
+                # markup we generate carries the pin/pad/layer metadata the preview
+                # hovers and toggles on, and it is the geometry the importer produces.
+                data["symbol"], data["footprint"] = proDrawings(
+                    attributes.get('Symbol'), attributes.get('Footprint'))
 
-                    # Last: the drawings are a bonus, the links above must survive their failure.
-                    # Our own render comes first even when EasyEDA has one: only markup we
-                    # generate carries the pin/pad/layer metadata the preview hovers and
-                    # toggles on, and it is the same geometry the importer will produce.
-                    preview_symbol, preview_footprint = proDrawings(
-                        attributes.get('Symbol'), attributes.get('Footprint'))
+                if not data["symbol"] and not data["footprint"]:
+                    # Nothing drawable in the documents: fall back to the flat SVG
+                    # EasyEDA renders for LCSC-coded parts.
+                    data["symbol"], data["footprint"] = productSvgs(code)
+            except Exception as e:
+                traceback.print_exc()
+                warning(f"Failed to load device info for {itemCode}: {e}")
 
-                    if not preview_symbol and not preview_footprint:
-                        # Nothing drawable in the documents: fall back to the flat SVG
-                        # EasyEDA renders for LCSC-coded parts.
-                        preview_symbol, preview_footprint = productSvgs(code)
-                except Exception as e:
-                    traceback.print_exc()
-                    warning(f"Failed to load device info for {itemCode}: {e}")
+            return data
 
-                setLinks(*links)
+        def applyPreview( itemCode, data ):
+            """Put one fetched preview on screen."""
+            dlg.m_partTitle.SetLabel(data["title"] or itemCode)
+            setLinks(*data["links"])
+            setParams(data["attributes"])
+            showDrawing(self.symbolView, data["symbol"], "symbol")
+            showDrawing(self.footprintView, data["footprint"], "footprint")
 
-            dlg.m_partTitle.SetLabel(preview_title or itemCode)
-            setParams(attributes)
-            showDrawing(self.symbolView, preview_symbol, "symbol")
-            showDrawing(self.footprintView, preview_footprint, "footprint")
+            # Follow the part: a footprint-only document has nothing on its Symbol
+            # page and would otherwise leave the user staring at an empty one. A part
+            # with both drawings leaves the chosen tab alone.
+            if data["footprint"] and not data["symbol"]:
+                dlg.m_previewNotebook.SetSelection(1)
+            elif data["symbol"] and not data["footprint"]:
+                dlg.m_previewNotebook.SetSelection(0)
+
             dlg.m_detailsPanel.Layout()
+
+        def onSearchItemSelected( event ):
+            itemCode = dlg.m_searchResultsTree.GetItemText(event.GetItem(), 1)
+            previewSeq[0] += 1
+            seq = previewSeq[0]
+
+            if itemCode in previewCache:
+                applyPreview(itemCode, previewCache[itemCode])
+                return
+
+            def finish( data ):
+                previewCache[itemCode] = data
+
+                while len(previewCache) > 64:
+                    previewCache.pop(next(iter(previewCache)))
+
+                # A slower part selected earlier must not overwrite the current one,
+                # but its result is worth keeping: selecting it again is then free.
+                if seq == previewSeq[0]:
+                    applyPreview(itemCode, data)
+
+            def worker():
+                data = fetchPreview(itemCode)
+                wx.CallAfter(finish, data)
+
+            # Up to four EasyEDA round trips: fast on a good day, unbounded on a bad
+            # one. On the UI thread that froze all of pcbnew, mid-click, for as long
+            # as EasyEDA felt like taking.
+            dlg.m_partTitle.SetLabel(f"{itemCode} \u2026")
+            setLinks()
+            setParams({})
+            showDrawing(self.symbolView, LOADING_NOTE, "symbol")
+            showDrawing(self.footprintView, LOADING_NOTE, "footprint")
+            dlg.m_detailsPanel.Layout()
+            Thread(target=worker, daemon=True).start()
 
         def setLinks( *links ):
             """Fill the link row beside the parameters; unused links hide."""

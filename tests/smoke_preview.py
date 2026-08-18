@@ -44,6 +44,9 @@ PRO_CODELESS = "da76dbd12af14461a059de2fae304c81"
 PRO_EMPTY = "636dcb04ffc646ac9fa6cd7b27e8768e"
 # An EasyEDA Std part, previewed with EasyEDA's own rendered thumbnails.
 STD_PART = "std:4c0dae4e58984c06b7812642e521e379"
+# 191f82fa… = "TYPE-C-SMD_USB-AMALECONNECTOR", a Std document with `docType` 4: a
+# standalone footprint, with no symbol at all. It must not claim the Symbol tab.
+STD_FOOTPRINT = "std:191f82fa4cdb4362ace6b365bebb2565"
 
 app = wx.App()
 app.SetAssertMode(wx.APP_ASSERT_SUPPRESS)
@@ -64,6 +67,17 @@ def pump(seconds):
         wx.Yield()
         time.sleep(0.05)
 
+def settle(seconds=45):
+    """Wait for the fetch thread to deliver. The preview is asynchronous now: the
+    handler returns at once and parks a loading note in both panes."""
+    end = time.time() + seconds
+
+    while time.time() < end and dialog.m_partTitle.GetLabel().endswith("\u2026"):
+        wx.Yield()
+        time.sleep(0.05)
+
+    pump(1.2)  # the WebViews still have to load the page they were handed
+
 # Cleared the first time a simulated click fails to reach the tree; after that
 # the handler is called directly and the click is not retried.
 clicked = True
@@ -78,6 +92,11 @@ class StubSelection:
     def GetItem(self):
         return self.item
 
+
+# How long each selection held the UI thread. The fetch used to run inside the
+# handler, so choosing a part froze pcbnew until EasyEDA answered - minutes, when
+# it answered slowly, because none of the requests had a deadline.
+blocks = []
 
 def readPanels():
     panels = {}
@@ -127,14 +146,16 @@ def selectRow(code):
         sim.MouseMove(origin.x + 60, origin.y + 55)
         pump(0.2)
         sim.MouseClick(wx.MOUSE_BTN_LEFT)
-        pump(4.0)
+        settle()
         panels = readPanels()
 
     if not any("<svg" in html or "<img" in html or "note" in html for html in panels.values()):
         clicked = False
         tree.Select(item)
+        blocked = time.time()
         plugin.onSearchItemSelected(StubSelection(item))
-        pump(4.5)
+        blocks.append(time.time() - blocked)
+        settle()
         panels = readPanels()
 
     return panels
@@ -153,8 +174,14 @@ panels = selectRow(PRO_CODED)
 report("pro, coded", panels)
 for name, html in panels.items():
     assert drawings(html) == 1, f"{name} panel holds {drawings(html)} drawings, expected 1"
-    assert "<svg" in html, f"{name} should be EasyEDA's own inline SVG"
+    assert "<svg" in html, f"{name} should be inline SVG"
     assert 'class="note"' not in html, f"{name} panel shows a note despite having a drawing"
+    # A part with an LCSC code is one EasyEDA renders itself, and that flat SVG used
+    # to win. It carries no pin or pad identity, so the hover tooltips and the layer
+    # toggles were missing on exactly the parts most people search for.
+    assert "data-kind" in html, \
+        f"{name} panel is EasyEDA's flat SVG, not our own interactive render"
+assert 'data-layer=' in panels["footprint"], "footprint render carries no layer groups"
 
 # The viewer links are wx hyperlinks beside the parameters, not part of the HTML.
 link = dialog.m_searchHyperlink1
@@ -194,6 +221,38 @@ for name, html in panels.items():
     assert "<img" in html, f"{name} should be an EasyEDA thumbnail"
 assert "easyeda.com/component/" in link.GetURL(), f"Std viewer link: {link.GetURL()}"
 assert link.GetLabel() == "Open in EasyEDA Std", f"link label: {link.GetLabel()}"
+
+panels = selectRow(STD_FOOTPRINT)
+report("std, footprint", panels)
+# docType 4 is a standalone footprint document: it *is* the footprint and has no
+# symbol. It used to be drawn on the Symbol tab as well, promising a symbol that
+# the library will not contain.
+assert drawings(panels["footprint"]) == 1, "the footprint pane holds no thumbnail"
+assert drawings(panels["symbol"]) == 0, "a footprint-only document drew a symbol"
+assert 'class="note"' in panels["symbol"], "the symbol pane is blank with no explanation"
+notebook = dialog.m_previewNotebook
+assert notebook.GetPageText(notebook.GetSelection()) == "Footprint", \
+    f"a footprint-only part left the user on the {notebook.GetPageText(notebook.GetSelection())} tab"
+params = dict((dialog.m_paramsList.GetItemText(row, 0), dialog.m_paramsList.GetItemText(row, 1))
+              for row in range(dialog.m_paramsList.GetItemCount()))
+assert params.get("Footprint in KiCad") == "TYPE-C-SMD_USB-AMALECONNECTOR", \
+    f"footprint name: {params.get('Footprint in KiCad')!r}"
+assert "Symbol in KiCad" not in params, "a footprint-only document reported a symbol name"
+
+# Selecting a part must cost the UI nothing, and selecting it twice must cost
+# nothing at all: the fetch runs on a thread and its result is cached.
+if blocks:
+    print(f"worst UI block {max(blocks) * 1000:.0f}ms over {len(blocks)} selections")
+    assert max(blocks) < 0.35, f"a selection blocked the UI for {max(blocks):.2f}s"
+
+item = tree.GetFirstItem()
+start = time.time()
+plugin.onSearchItemSelected(StubSelection(item))
+cached = time.time() - start
+print(f"re-selecting the same part: {cached * 1000:.0f}ms")
+assert cached < 0.35, f"a cached re-selection took {cached:.2f}s"
+assert not dialog.m_partTitle.GetLabel().endswith("\u2026"), \
+    "a cached re-selection went back to the network"
 
 print("PREVIEW SMOKE OK",
       "(driven by simulated clicks)" if clicked
