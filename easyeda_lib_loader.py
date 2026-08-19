@@ -931,6 +931,59 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
 
             return count, math.ceil(count / pageSize())
 
+        def uuidSearch( term ):
+            """Resolve a pasted uuid against both APIs.
+
+            Neither EasyEDA keyword search indexes uuids - not a device uuid, not a
+            Std document uuid, not a model uuid - so pasting one returned nothing at
+            all even for a part that exists. Both APIs answer a direct lookup, so a
+            uuid is looked up instead of searched.
+            """
+            uuid = term.strip()
+
+            if uuid.lower().startswith(STD_PREFIX):
+                uuid = uuid[len(STD_PREFIX):]
+
+            try:
+                device = proResult(session.get(PRO_DEVICE_URL.format(uuid=uuid)).json())
+                # A direct lookup does not say which facet the device came from; LCSC
+                # parts are the ones carrying a supplier code.
+                source = SOURCE_SYSTEM if (device.get("attributes") or {}).get(
+                    "Supplier Part") else SOURCE_PUBLIC
+                addRows([proRow(device, source)])
+
+                return 1, 1
+            except Exception as e:
+                debug(f"{uuid} is not an EasyEDA Pro device: {e}")
+
+            try:
+                result = session.get(STD_COMPONENT_URL.format(uuid=uuid)).json()
+
+                if result.get("success") and result.get("result"):
+                    addRows([stdRow(result["result"])])
+
+                    return 1, 1
+            except Exception as e:
+                debug(f"{uuid} is not an EasyEDA Std component: {e}")
+
+            # A 3D model file uuid resolves on neither: it is not a part at all, and
+            # is downloaded with whichever part references it.
+            try:
+                if session.head(MODEL_FILE_URL.format(uuid=uuid)).status_code == 200:
+                    warning(f"{uuid} is a 3D model file, not a part. Search for the part"
+                            f" that uses it (by name or LCSC code); its model is"
+                            f" downloaded automatically.")
+
+                    return 0, 1
+            except Exception as e:
+                debug(f"{uuid} is not a model file either: {e}")
+
+            warning(f"Nothing found for {uuid}. Codes and names are searched; a uuid is"
+                    f" looked up directly, and this one is neither a Pro device nor a"
+                    f" Std document.")
+
+            return 0, 1
+
         def searchWorker(sourceId, words, page):
             setStatus("Searching…")
             wx.CallAfter(dlg.m_prevPageBtn.Disable)
@@ -940,12 +993,21 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
                 counts = []
                 totalPages = 1
 
+                # A uuid is not searchable text; it is looked up on both APIs instead.
+                searches = SOURCE_SEARCHES[sourceId]
+
+                if re.fullmatch(r"(?:std:)?[0-9a-fA-F]{32}", words.strip()):
+                    searches = [("", lambda term, page: uuidSearch(term))]
+
                 # "All Sources" means both APIs, not just Pro's three facets.
-                for label, search in SOURCE_SEARCHES[sourceId]:
+                for label, search in searches:
                     try:
                         count, pages = search(words, page)
                         totalPages = max(totalPages, pages)
-                        counts.append(f"{count} {label}" if label else f"{count} parts")
+                        # "1 part", "2 parts", "1 JLC part" - the label names the
+                        # source, the noun is pluralised against the count.
+                        counts.append(f"{count} {label + ' ' if label else ''}"
+                                      f"part{'' if count == 1 else 's'}")
                     except KeyboardInterrupt:
                         raise
                     except Exception as e:
@@ -1452,8 +1514,8 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
         # at module level: index matches m_libSourceChoice's order.
         SOURCE_SEARCHES.clear()
         SOURCE_SEARCHES.extend([
-            [("JLC parts", lambda words, page: proSearchFn(None, words, page)),
-             ("EasyEDA Std parts", stdSearchFn)],
+            [("JLC", lambda words, page: proSearchFn(None, words, page)),
+             ("EasyEDA Std", stdSearchFn)],
             [("", lambda words, page: proSearchFn("lcsc", words, page))],
             [("", lambda words, page: proSearchFn("user", words, page))],
             [("", stdSearchFn)],

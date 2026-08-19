@@ -25,6 +25,9 @@ STD_COMPONENT_URL = "https://easyeda.com/api/components/{uuid}"
 # EasyEDA Pro (pro.easyeda.com) endpoints.
 PRO_COMPONENT_URL = "https://pro.easyeda.com/api/v2/components/{uuid}"
 PRO_DEVICE_URL = "https://pro.easyeda.com/api/devices/{uuid}"
+# Where a 3D model file itself lives. Not a component endpoint: a model uuid 404s
+# on /api/v2/components/ and answers here.
+MODEL_FILE_URL = "https://modules.easyeda.com/qAxj6KHrDKw4blvCG8QJPs7Y/{uuid}"
 PRO_SEARCH_URL = "https://pro.easyeda.com/api/v2/devices/search"
 PRO_SEARCH_BY_CODES_URL = "https://pro.easyeda.com/api/v2/devices/searchByCodes"
 
@@ -700,12 +703,8 @@ class ComponentLoader():
                             info("Skipping '%s': STEP model file already exists." % (file_name))
                             self.statExisting += 1
                         else:
-                            stepUrlFormat = "https://modules.easyeda.com/qAxj6KHrDKw4blvCG8QJPs7Y/{uuid}"
                             jfilePath = kfilePath + "_jlc"
-                            url = stepUrlFormat.format(uuid=directUuid)
-
-                            debug("Downloading '%s'" % (file_name))
-                            debug("'%s' from '%s'" % (file_name, url))
+                            url = MODEL_FILE_URL.format(uuid=directUuid)
                             os.makedirs(os.path.dirname(kfilePath), exist_ok=True)
 
                             try:
