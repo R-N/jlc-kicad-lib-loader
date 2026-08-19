@@ -811,14 +811,14 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
                                         target_name=target_name, progress=progressHandler,
                                         session=session)
                 summary = loader.downloadAll(components, self.queue.aliases())
-                wx.CallAfter(onDownloadFinished, summary)
+                wx.CallAfter(onDownloadFinished, summary, components)
 
             setResult(f"Downloading {len(components)} part{'' if len(components) == 1 else 's'}…")
             dlg.m_actionBtn.Disable()
             self.downloadThread = Thread(target = threadedFn, daemon=True)
             self.downloadThread.start()
 
-        def onDownloadFinished( summary ):
+        def onDownloadFinished( summary, requested ):
             self.downloadThread = None
             parts = [f"{summary['symbols']} symbol{'' if summary['symbols'] == 1 else 's'}",
                      f"{summary['footprints']} footprint{'' if summary['footprints'] == 1 else 's'}",
@@ -827,17 +827,20 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
             if summary["skipped"]:
                 parts.append(f"{summary['skipped']} without a STEP model")
 
+            # Whatever landed leaves the queue; whatever did not stays, so a retry
+            # repeats only the parts that need it instead of the whole list.
+            stillFailing = set(summary.get("failedItems") or [])
+            self.queue.remove([code for code in requested if code not in stillFailing])
             failed = summary["failed"] or summary["error"]
 
             if failed:
-                # The queue keeps its parts so the run can be retried once the cause
-                # is fixed, and the log opens itself because something needs reading.
+                kept = (f" {len(stillFailing)} part{'' if len(stillFailing) == 1 else 's'}"
+                        f" left in the queue." if stillFailing else "")
                 setResult(f"Finished with problems: {summary['error'] or str(summary['failed']) + ' failed'}."
-                          f" Downloaded {', '.join(parts)}. See Details.")
+                          f" Downloaded {', '.join(parts)}.{kept} See Details.")
                 dlg.m_logPane.Expand()
                 dlg.Layout()
             else:
-                self.queue.clear()
                 setResult(f"Downloaded {', '.join(parts)}. Restart pcbnew to use new footprints.")
 
             refreshQueue()
@@ -1440,6 +1443,7 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
         self.onRenderToggle = onRenderToggle
         self.onSearch = onSearch
         self.onDownload = onDownload
+        self.onDownloadFinished = onDownloadFinished
         self.addRows = addRows
         self.renderRows = renderRows
         self.refreshQueue = refreshQueue

@@ -313,7 +313,7 @@ def test_std_library():
 
     # docType 2 carries its footprint in packageDetail; docType 4 *is* a
     # footprint. Getting this wrong filed footprints as symbols.
-    models, symbolCount, footprintCount = loader.downloadStd(["sym", "fp"])
+    models, symbolCount, footprintCount, _ = loader.downloadStd(["sym", "fp"])
     check((symbolCount, footprintCount) == (1, 2),
           f"counts reported to the caller are wrong: {symbolCount}, {footprintCount}")
     zip_path = os.path.join(target, "Test-std.zip")
@@ -1007,6 +1007,147 @@ def test_std_empty_documents():
     check(std_render._mm(0) == "0.000 mm", "zero should still be a millimetre string")
 
 
+# --------------------------------------------------------------------------
+# component_loader: which queued part failed
+# --------------------------------------------------------------------------
+
+class FailingSession:
+    """Answers the Pro endpoints, failing whichever uuids it is told to fail.
+
+    Shaped like the real APIs: EasyEDA Pro answers HTTP 200 with success=false, and
+    `searchByCodes` simply omits a code it does not know.
+    """
+
+    def __init__(self, devices, components, unknownCodes=()):
+        self.devices = devices
+        self.components = components
+        self.unknownCodes = set(unknownCodes)
+        self.asked = []
+
+    def post(self, url, data=None, **kwargs):
+        codes = [code for code in (data or {}).get("codes[]", [])
+                 if code not in self.unknownCodes]
+
+        return FakeResponse({"success": True,
+                             "result": [{"uuid": f"dev-{code}", "product_code": code}
+                                        for code in codes]})
+
+    def get(self, url, **kwargs):
+        uuid = url.rsplit("/", 1)[-1]
+        self.asked.append(uuid)
+        source = self.devices if "/devices/" in url else self.components
+
+        if uuid not in source:
+            return FakeResponse({"success": False, "code": 404,
+                                 "message": "Component not found"})
+
+        return FakeResponse({"success": True, "result": source[uuid]})
+
+
+def proDevice(uuid, symbol, footprint, model=None):
+    attributes = {"Symbol": symbol, "Footprint": footprint}
+
+    if model:
+        attributes.update({"3D Model": model, "3D Model Title": "PKG_3D",
+                           "3D Model Transform": "100,200,0"})
+
+    return {"uuid": uuid, "display_title": uuid, "product_code": uuid.replace("dev-", ""),
+            "symbol_type": 2, "footprint_type": 4, "attributes": attributes,
+            "symbol": {"display_title": "SYM"}, "footprint": {"display_title": "FP"}}
+
+
+def test_failed_items():
+    import component_loader as cl
+
+    documents = {"sym-ok": {"uuid": "sym-ok", "dataStr": "[\"HEAD\"]", "display_title": "SYM"},
+                 "fp-ok": {"uuid": "fp-ok", "dataStr": "[\"HEAD\"]", "display_title": "FP"}}
+    devices = {"dev-C1": proDevice("dev-C1", "sym-ok", "fp-ok"),
+               "dev-C2": proDevice("dev-C2", "sym-gone", "fp-ok")}
+    session = FailingSession(devices, documents, unknownCodes=["C404"])
+    target = tempfile.mkdtemp(prefix="jlcfail")
+    loader = cl.ComponentLoader(kiprjmod=target, target_path=target, target_name="Lib",
+                               progress=lambda a, b: None, session=session)
+
+    _, _, symbols, footprints, failed = loader.downloadSymFp(["C1", "C2", "C404"])
+
+    # A code EasyEDA does not know used to be dropped from the answer and never
+    # mentioned again: the part was reported as downloaded.
+    check("C404" in failed, f"an unknown code is not reported as failed: {failed}")
+    # C2's symbol document 404s, so C2 failed - but C1, which shares nothing with it,
+    # must not be blamed.
+    check("C2" in failed, f"a part whose symbol is missing is not failed: {failed}")
+    check("C1" not in failed, f"a good part was reported as failed: {failed}")
+    check(symbols == 1 and footprints == 1,
+          f"expected one symbol and one footprint in the zip, got {symbols}/{footprints}")
+
+
+def test_direct_model_uuid():
+    import component_loader as cl
+
+    # Some devices name the model file itself in `3D Model` instead of a docType 16
+    # wrapper document (the TO-92-3 parts do; that uuid answers 404 on the component
+    # endpoint and 200 on the model endpoint). A missing wrapper must therefore neither
+    # fail the part nor lose its 3D model.
+    devices = {"dev-C1": proDevice("dev-C1", "sym-ok", "fp-ok", model="model-direct")}
+    documents = {"sym-ok": {"uuid": "sym-ok", "dataStr": "[\"HEAD\"]"},
+                 "fp-ok": {"uuid": "fp-ok", "dataStr": "[\"HEAD\"]"}}
+    session = FailingSession(devices, documents)
+    target = tempfile.mkdtemp(prefix="jlcmodel")
+    loader = cl.ComponentLoader(kiprjmod=target, target_path=target, target_name="Lib",
+                               progress=lambda a, b: None, session=session)
+
+    libDeviceFile, fetched, _, _, failed = loader.downloadSymFp(["C1"])
+    check(not failed, f"an unwrapped 3D model failed the part: {failed}")
+    check("model-direct" in session.asked, "the model uuid was never tried")
+
+    tasks = loader.collectProModels(libDeviceFile, fetched)
+    check(list(tasks) == ["model-direct"],
+          f"the model uuid was not used directly: {list(tasks)}")
+    path, fitX, fitY = tasks["model-direct"]
+    check(path.endswith(os.path.join("EASYEDA_MODELS", "PKG_3D.step")), f"model path {path}")
+    # The transform is in mils: 100 and 200 mils are 2.54 and 5.08 mm.
+    check(abs(fitX - 2.54) < 0.001 and abs(fitY - 5.08) < 0.001, f"fit {fitX}, {fitY}")
+
+    # A wrapper document that *is* present still wins, and names the file it points at.
+    documents["model-wrapped"] = {"uuid": "model-wrapped",
+                                  "dataStr": json.dumps({"model": "real-model-file"})}
+    devices["dev-C1"]["attributes"]["3D Model"] = "model-wrapped"
+    libDeviceFile, fetched, _, _, _ = loader.downloadSymFp(["C1"])
+    tasks = loader.collectProModels(libDeviceFile, fetched)
+    check(list(tasks) == ["real-model-file"],
+          f"the wrapper's own model was ignored: {list(tasks)}")
+
+
+def test_std_failed_items():
+    import component_loader as cl
+
+    class HalfBrokenSession(FakeSession):
+        def get(self, url, **kwargs):
+            uuid = url.rsplit("/", 1)[-1]
+
+            if uuid not in self.documents:
+                return FakeResponse({"success": False, "message": "not found"})
+
+            return FakeResponse({"success": True, "result": self.documents[uuid]})
+
+    target = tempfile.mkdtemp(prefix="jlcstdfail")
+    session = HalfBrokenSession({"good-uuid": SYMBOL_DOC})
+    loader = cl.ComponentLoader(kiprjmod=target, target_path=target, target_name="Lib",
+                               progress=lambda a, b: None, session=session)
+
+    _, symbols, footprints, failed = loader.downloadStd(["good-uuid", "missing-uuid"])
+    check(symbols == 1 and footprints == 1, f"the good part did not land: {symbols}/{footprints}")
+    # Std failures were not counted at all, so a 404 part was cleared from the queue
+    # as a success. The queue key carries the prefix, which is what it is queued as.
+    check(failed == {"std:missing-uuid"}, f"failed items are {failed}")
+
+    # Nothing loadable at all used to raise, which aborted the whole run - including
+    # the Pro half, whose library had already been written.
+    tasks, symbols, footprints, failed = loader.downloadStd(["missing-uuid"])
+    check((symbols, footprints) == (0, 0), "counted something from an empty run")
+    check(failed == {"std:missing-uuid"}, f"failed items are {failed}")
+
+
 SECTIONS = [
     ("pro_render, real document", test_real_document, ()),
     ("pro_render, axis and units", test_y_axis_and_units, ()),
@@ -1025,6 +1166,9 @@ SECTIONS = [
     ("easyeda_lib_loader, queue aliases", test_queue_aliases, ("requests", "pcbnew", "wx")),
     ("component_loader, library index", test_library_index, ("requests", "pcbnew")),
     ("component_loader, part aliases", test_part_aliases, ("requests", "pcbnew")),
+    ("component_loader, failed items", test_failed_items, ("requests", "pcbnew")),
+    ("component_loader, direct model uuid", test_direct_model_uuid, ("requests", "pcbnew")),
+    ("component_loader, Std failed items", test_std_failed_items, ("requests", "pcbnew")),
     ("component_loader, alias cleanup", test_alias_runaway_cleanup, ("requests", "pcbnew")),
     ("config_manager, library tables", test_library_tables, ("wx",)),
     ("component_loader, pro result", test_pro_result, ("requests", "pcbnew")),

@@ -5,7 +5,7 @@ library-table prompt, a modal wx.MessageDialog that nothing clicks in an unatten
 run, and ComponentLoader itself, because what is under test is the wiring rather
 than another download. Needs wx and a display; no network.
 """
-import os, sys, tempfile, types
+import os, sys, tempfile, time, types
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 project = tempfile.mkdtemp(prefix="aliaswiring")
@@ -30,8 +30,12 @@ class FakeLoader:
     def downloadAll(self, components, aliases=None):
         captured["components"] = list(components)
         captured["aliases"] = aliases
-        return {"symbols": len(components), "footprints": len(components),
-                "models": 0, "skipped": 0, "failed": 0, "error": None}
+        failedItems = captured.get("failedItems", [])
+        landed = [code for code in components if code not in failedItems]
+
+        return {"symbols": len(landed), "footprints": len(landed), "models": 0,
+                "skipped": 0, "failed": len(failedItems), "failedItems": list(failedItems),
+                "error": None}
 
 
 # No modal: the prompt is a YES/NO dialog and this run has nobody to answer it.
@@ -61,7 +65,7 @@ for _ in range(200):
     wx.Yield()
     if plugin.downloadThread is None and dlg.m_resultStatus.GetLabel():
         break
-    import time; time.sleep(0.05)
+    time.sleep(0.05)
 
 print("prompted for library tables:", captured.get("prompted"))
 print("components:", captured.get("components"))
@@ -73,6 +77,32 @@ assert captured.get("aliases") == {"C15127": "MY-MOSFET",
     f"the aliases did not reach the loader: {captured.get('aliases')}"
 print("result:", dlg.m_resultStatus.GetLabel())
 assert len(plugin.queue) == 0, "a clean run must empty the queue"
+
+# A run where one part fails must keep exactly that part: the whole queue used to
+# survive, so the next Download silently repeated everything that already landed.
+captured["failedItems"] = ["C6186"]
+plugin.queue.addCodes("C15127\nC6186\nstd:4c0dae4e58984c06b7812642e521e379\n")
+plugin.refreshQueue()
+plugin.onDownload(None)
+
+for _ in range(200):
+    wx.Yield()
+
+    if plugin.downloadThread is None and "problems" in dlg.m_resultStatus.GetLabel():
+        break
+
+    time.sleep(0.05)
+
+print("result:", dlg.m_resultStatus.GetLabel())
+print("left in queue:", plugin.queue.codes())
+assert plugin.queue.codes() == ["C6186"], \
+    f"the queue should hold only the failure, holds {plugin.queue.codes()}"
+assert "1 part left in the queue" in dlg.m_resultStatus.GetLabel(), \
+    f"the result line does not say what was kept: {dlg.m_resultStatus.GetLabel()}"
+assert dlg.m_queueList.GetItemCount() == 1, "the queue list still shows the cleared parts"
+plugin.queue.clear()
+plugin.refreshQueue()
+captured.pop("failedItems")
 
 # The Alias cell is edited by double-clicking the row, which wx reports as ITEM_ACTIVATED.
 plugin.queue.addCodes("C2040\n")

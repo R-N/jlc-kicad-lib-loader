@@ -291,42 +291,50 @@ class ComponentLoader():
 
     # Downloads everything and returns what reached the library, so the caller can show an
     # outcome instead of making the user read the log:
-    # { symbols, footprints, models, skipped, failed, error }
+    # { symbols, footprints, models, skipped, failed, failedItems, error }
     def downloadAll(self, components, aliases=None):
         self.progress(0, 100)
 
         proComponents, stdComponents = splitSources(components)
         summary = {"symbols": 0, "footprints": 0, "models": 0, "skipped": 0, "failed": 0,
-                   "error": None}
+                   "failedItems": [], "error": None}
 
         try:
             modelTasks = {}
-            fetchFailures = 0
+            # The queued items that did not make it, so the caller can keep exactly
+            # those and drop the rest instead of retrying the whole list.
+            failedItems = set()
 
             if proComponents:
                 libDeviceFile, fetched_3dmodels, proSymbols, proFootprints, proFailed = \
                     self.downloadSymFp(proComponents, aliases)
                 summary["symbols"] += proSymbols
                 summary["footprints"] += proFootprints
-                fetchFailures += proFailed
+                failedItems |= proFailed
                 modelTasks.update(self.collectProModels(libDeviceFile, fetched_3dmodels))
 
             if stdComponents:
-                stdTasks, stdSymbols, stdFootprints = self.downloadStd(stdComponents)
+                stdTasks, stdSymbols, stdFootprints, stdFailed = self.downloadStd(stdComponents)
                 summary["symbols"] += stdSymbols
                 summary["footprints"] += stdFootprints
+                failedItems |= stdFailed
                 modelTasks.update(stdTasks)
 
             self.downloadModels(modelTasks)
             summary["models"] = self.statDownloaded + self.statExisting
             summary["skipped"] = self.statSkipped
-            summary["failed"] = self.statFailed + fetchFailures
+            # A 3D model that will not download is not a failed part: the symbol and
+            # the footprint are in the library and usable without it.
+            summary["failed"] = self.statFailed + len(failedItems)
+            summary["failedItems"] = sorted(failedItems)
             self.progress(100, 100)
             self.warnRescanNeeded()
         except Exception as e:
             traceback.print_exc()
             error(f"Failed to download components: {traceback.format_exc()}")
             summary["error"] = str(e) or e.__class__.__name__
+            # An abort says nothing about individual parts, so the queue keeps them all.
+            summary["failedItems"] = list(components)
 
         return summary
 
@@ -353,6 +361,10 @@ class ComponentLoader():
                 direct_uuids.append(comp)
 
         fetched_devices = {}
+        # Which queued item asked for each device, so a failure can be reported
+        # against the part the user queued rather than against a uuid they never saw.
+        requestedBy = {uuid: uuid for uuid in direct_uuids}
+        failedItems = set()
 
         # Fetch UUIDs from code-based components
         if code_components:
@@ -368,6 +380,14 @@ class ComponentLoader():
             # Append fetched UUIDs to direct_uuids
             for entry in found["result"]:
                 direct_uuids.append(entry['uuid'])
+                requestedBy[entry["uuid"]] = entry.get("code") or entry.get("product_code") \
+                    or entry["uuid"]
+
+            # A code EasyEDA does not know is simply absent from the answer, and used
+            # to vanish silently - reported as a success, cleared from the queue.
+            for code in set(code_components) - set(requestedBy.values()):
+                error(f"No EasyEDA Pro device for {code}")
+                failedItems.add(code)
 
         # Fetch device info by UUID
         def fetch_device_info(dev_uuid):
@@ -379,8 +399,6 @@ class ComponentLoader():
             device = proResult(dev_info.json())
             fetched_devices[device["uuid"]] = device
 
-        failed = 0
-
         with concurrent.futures.ThreadPoolExecutor() as executor:
             futures = {executor.submit(fetch_device_info, dev_uuid): dev_uuid
                        for dev_uuid in direct_uuids}
@@ -389,8 +407,9 @@ class ComponentLoader():
                 try:
                     future.result()
                 except Exception as e:
-                    failed += 1
-                    error(f"Failed to fetch device {futures[future]}: {e}")
+                    uuid = futures[future]
+                    failedItems.add(requestedBy.get(uuid, uuid))
+                    error(f"Failed to fetch device {uuid}: {e}")
 
         # Collect symbol/footprint/3D model UUIDs to fetch
         fetched_symbols = {}
@@ -399,18 +418,29 @@ class ComponentLoader():
         uuid_to_obj_map = {}
 
         all_uuids = set()
+        modelUuids = set()
+        # Which queued items depend on each document, so one unreadable symbol is
+        # reported against every part that shares it.
+        neededBy = {}
+
         for entry in fetched_devices.values():
+            item = requestedBy.get(entry["uuid"], entry["uuid"])
+
             if entry['attributes'].get('Symbol'):
                 all_uuids.add(entry['attributes']['Symbol'])
                 uuid_to_obj_map[entry['attributes']['Symbol']] = fetched_symbols
+                neededBy.setdefault(entry['attributes']['Symbol'], set()).add(item)
 
             if entry['attributes'].get('Footprint'):
                 all_uuids.add(entry['attributes']['Footprint'])
                 uuid_to_obj_map[entry['attributes']['Footprint']] = fetched_footprints
+                neededBy.setdefault(entry['attributes']['Footprint'], set()).add(item)
 
             if entry['attributes'].get('3D Model'):
-                all_uuids.add(getUuidFirstPart(entry['attributes']['3D Model']))
-                uuid_to_obj_map[getUuidFirstPart(entry['attributes']['3D Model'])] = fetched_3dmodels
+                modelUuid = getUuidFirstPart(entry['attributes']['3D Model'])
+                all_uuids.add(modelUuid)
+                modelUuids.add(modelUuid)
+                uuid_to_obj_map[modelUuid] = fetched_3dmodels
 
         # Fetch symbols/footprints/3D models
         def fetch_component(uuid):
@@ -422,22 +452,40 @@ class ComponentLoader():
         with concurrent.futures.ThreadPoolExecutor() as executor:
             futures = {executor.submit(fetch_component, uuid): uuid for uuid in all_uuids}
             for future in concurrent.futures.as_completed(futures):
+                uuid = futures[future]
+
                 try:
                     compData = future.result()
                     debug(f"Fetched component {json.dumps(compData, indent=4)}")
 
                     uuid_to_obj_map[compData["uuid"]][compData["uuid"]] = compData
                 except Exception as e:
-                    failed += 1
-                    error(f"Failed to fetch component {futures[future]}: {e}")
+                    if uuid in modelUuids:
+                        # A `3D Model` attribute usually names a docType 16 wrapper
+                        # document, whose dataStr names the model file. Some devices
+                        # name the model file itself, which is not a component at all
+                        # (`86c9a287…`, shared by the TO-92-3 parts, answers 404 here
+                        # and 200 on the model endpoint). collectProModels falls back
+                        # to using the uuid directly, so this is not a failure - and a
+                        # 3D model never decides whether a part imports.
+                        info(f"3D model {uuid} is not a wrapper document: {e}."
+                             f" Treating it as a model file.")
+                        continue
 
-        # Set symbol/footprint type fields
+                    failedItems.update(neededBy.get(uuid, {uuid}))
+                    error(f"Failed to fetch component {uuid}: {e}")
+
+        # Set symbol/footprint type fields. A document whose fetch failed is simply
+        # absent: indexing it blindly aborted the whole download over one bad part.
         for device in fetched_devices.values():
-            if device['attributes'].get('Symbol'):
-                fetched_symbols[device["attributes"]["Symbol"]]["type"] = device["symbol_type"]
+            symbolUuid = device['attributes'].get('Symbol')
+            footprintUuid = device['attributes'].get('Footprint')
 
-            if device['attributes'].get('Footprint'):
-                fetched_footprints[device["attributes"]["Footprint"]]["type"] = device["footprint_type"]
+            if symbolUuid in fetched_symbols:
+                fetched_symbols[symbolUuid]["type"] = device["symbol_type"]
+
+            if footprintUuid in fetched_footprints:
+                fetched_footprints[footprintUuid]["type"] = device["footprint_type"]
 
         # Extract dataStr
         footprint_data_str = {}
@@ -449,6 +497,7 @@ class ComponentLoader():
             if ds:
                 footprint_data_str[f_uuid] = ds
             else:
+                failedItems.update(neededBy.get(f_uuid, set()))
                 warning(f"Footprint {f_uuid} has no readable document and is left out of the library.")
 
             f_data.pop("dataStr", None) # Remove the dataStr field if exists
@@ -459,6 +508,7 @@ class ComponentLoader():
             if ds:
                 symbol_data_str[s_uuid] = ds
             else:
+                failedItems.update(neededBy.get(s_uuid, set()))
                 warning(f"Symbol {s_uuid} has no readable document and is left out of the library.")
 
             s_data.pop("dataStr", None) # Remove the dataStr field if exists
@@ -514,7 +564,7 @@ class ComponentLoader():
         info( "*****************************" )
         info(f"Downloaded {len(fetched_devices)} devices, {written_symbols} symbols, "
              f"{written_footprints} footprints and added to library: {zip_filename}")
-        return libDeviceFile, fetched_3dmodels, written_symbols, written_footprints, failed
+        return libDeviceFile, fetched_3dmodels, written_symbols, written_footprints, failedItems
 
     # Collect 3D model download tasks for Pro devices: { model uuid: (target file, fit X mm, fit Y mm) }
     def collectProModels(self, libDeviceFile, fetched_3dmodels):
@@ -527,7 +577,7 @@ class ComponentLoader():
             try:
                 modelUuid = getUuidFirstPart(device["attributes"].get("3D Model"))
 
-                if not modelUuid or modelUuid not in fetched_3dmodels:
+                if not modelUuid:
                     info("No model for device '%s', footprint '%s'"
                          % (device.get("product_code", device.get("uuid")), 
                             device.get("footprint").get("display_title") if device.get("footprint") else "None"))
@@ -535,16 +585,22 @@ class ComponentLoader():
 
                 modelTitle = device["attributes"]["3D Model Title"]
                 modelTransform = device["attributes"].get("3D Model Transform", "")
-
-                dataStr = self.extractDataStr(fetched_3dmodels[modelUuid])
+                wrapper = fetched_3dmodels.get(modelUuid)
+                dataStr = self.extractDataStr(wrapper) if wrapper else ""
 
                 if dataStr:
+                    # The usual case: a docType 16 document naming the model file.
                     directUuid = json.loads(dataStr)["model"]
-                else:
+                elif wrapper:
                     info("Unable to extract model for device '%s', footprint '%s'"
                          % (device.get("product_code", device.get("uuid")), 
                             device.get("footprint").get("display_title") if device.get("footprint") else "None"))
                     continue
+                else:
+                    # No wrapper document came back, because some devices name the
+                    # model file directly in `3D Model` (the TO-92-3 parts do). The
+                    # model endpoint takes exactly this uuid, so use it as it is.
+                    directUuid = modelUuid
 
                 # Transform is in mils
                 transform = [float(x) for x in modelTransform.split(",")]
@@ -719,12 +775,17 @@ class ComponentLoader():
 
             fetched[uuid] = found["result"]
 
+        failedItems = set()
+
         with concurrent.futures.ThreadPoolExecutor() as executor:
             futures = {executor.submit(fetchComponent, uuid): uuid for uuid in uuids}
             for future in concurrent.futures.as_completed(futures):
                 try:
                     future.result()
                 except Exception as e:
+                    # Uncounted, this used to be reported as a success and cleared from
+                    # the queue: the part was simply missing from the library afterwards.
+                    failedItems.add(STD_PREFIX + futures[future])
                     error(f"Failed to fetch EasyEDA Std component {futures[future]}: {e}")
 
         symbolShapes = {}
@@ -736,6 +797,7 @@ class ComponentLoader():
             dataStr = component.get("dataStr")
 
             if not dataStr:
+                failedItems.add(STD_PREFIX + uuid)
                 warning(f"Component {uuid} has no document data, skipping.")
                 continue
 
@@ -788,7 +850,11 @@ class ComponentLoader():
             modelTasks.update(self.collectStdModels(fpDataStr))
 
         if not symbolShapes and not footprintShapes:
-            raise Exception("No EasyEDA Std components could be loaded.")
+            # Raising here aborted the whole run, so Pro parts that had already been
+            # written to their own library were reported as failures too.
+            error("No EasyEDA Std components could be loaded.")
+
+            return modelTasks, 0, 0, failedItems
 
         zip_filename = self.writeStdLibrary(symbolShapes, footprintShapes, layers)
 
@@ -796,7 +862,7 @@ class ComponentLoader():
         info(f"Downloaded {len(symbolShapes)} symbols and {len(footprintShapes)} footprints "
              f"from EasyEDA Std into library: {zip_filename}")
 
-        return modelTasks, len(symbolShapes), len(footprintShapes)
+        return modelTasks, len(symbolShapes), len(footprintShapes), failedItems
 
     # Collect 3D model tasks from the "outline3D" SVGNODE of an EasyEDA Std footprint.
     def collectStdModels(self, fpDataStr):
