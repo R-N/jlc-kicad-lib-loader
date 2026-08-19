@@ -32,6 +32,15 @@ import wx  # noqa: E402
 
 from jlcpkg import easyeda_lib_loader as ell  # noqa: E402
 
+# Registering the library tables asks with a modal wx.MessageDialog, which nothing
+# is there to answer, so an unattended run hung there forever. The tables are
+# `smoke_download.py`'s subject; here the download itself is. Record the request
+# instead of showing it, and check the rows separately below.
+prompted = []
+ell.LibraryTableManager.prompt_add_library = (
+    lambda self, parent, lib_name, lib_path, sources=("pro",):
+        prompted.append((lib_name, tuple(sources))))
+
 # A JLC System part with a code, a JLC part reachable only by search text, and an
 # EasyEDA Std symbol: one of each download path.
 PRO_CODE = "C2040"
@@ -198,5 +207,12 @@ stdzip = os.path.join(target, "EasyEDA_Lib-std.zip")
 print("elibz:", os.path.exists(elibz), "| std zip:", os.path.exists(stdzip))
 assert os.path.exists(elibz), "the Pro part did not reach a .elibz"
 assert os.path.exists(stdzip), "the Std part did not reach a -std.zip"
+
+# Both sources were downloaded, so both were offered for registration - a Std part
+# whose table row is never proposed imports into a library KiCad cannot see.
+print("prompted:", prompted)
+assert prompted, "the library tables were never offered"
+assert prompted[-1] == ("EasyEDA_Lib", ("pro", "std")), \
+    f"both sources must be offered for a mixed download: {prompted}"
 
 print("DIALOG SMOKE OK")

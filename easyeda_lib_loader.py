@@ -344,6 +344,11 @@ def drawingPage( body ):
     """The drawing page holding one drawing. str.replace, not format: see above."""
     return DRAWING_PAGE.replace("__BODY__", body)
 
+# A pasted identifier that is a uuid, optionally still carrying the Std row prefix.
+# EasyEDA's keyword search indexes no uuid at all, so one is looked up directly
+# instead of searched; an LCSC code (C15127) must not take that path.
+UUID_PATTERN = re.compile(r"(?:std:)?[0-9a-fA-F]{32}")
+
 # Searches behind each entry of m_libSourceChoice, filled in createDialog because
 # the search functions close over the dialog.
 SOURCE_SEARCHES = []
@@ -996,7 +1001,7 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
                 # A uuid is not searchable text; it is looked up on both APIs instead.
                 searches = SOURCE_SEARCHES[sourceId]
 
-                if re.fullmatch(r"(?:std:)?[0-9a-fA-F]{32}", words.strip()):
+                if UUID_PATTERN.fullmatch(words.strip()):
                     searches = [("", lambda term, page: uuidSearch(term))]
 
                 # "All Sources" means both APIs, not just Pro's three facets.

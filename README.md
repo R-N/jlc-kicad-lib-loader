@@ -138,19 +138,30 @@ file-type guess does not recognize a `.zip` as an EasyEDA Std library.
 
 ## Searching and previewing
 
-Search by keyword, or paste a UUID to look up a single part directly. Results are one row per
-part: source, code or UUID, name, manufacturer part number, package, JLCPCB part class, what the
-row is (device, symbol or standalone footprint) and who contributed it, so you can judge a part
-before importing it. Click a column heading to sort. The **Filter** box beside the search box
-narrows the page you already have without asking the server again, which is the quick way through
-a hundred near-identical results.
+Search by keyword — a part number, a description, a package — or paste a UUID. EasyEDA's own
+search indexes neither kind of UUID, so a UUID is **looked up** directly instead: a JLC device
+UUID, an EasyEDA Std document UUID and a `std:`-prefixed one all resolve to their part. A UUID
+that belongs to a *3D model file* says so, because a model is not a part: find the part that uses
+it, and its model comes along automatically.
 
-Selecting a result shows its symbol and its footprint in their own panels, with the part's
-parameters below. Drawings come from EasyEDA's own renderings where they exist. EasyEDA only
-renders parts that carry an LCSC part number, so for JLC Public parts drawn from scratch the
-plugin draws the symbol and footprint itself from the part's own document. Parts whose EasyEDA
-document is empty — placeholders and title-block entries, of which the public library holds a
-fair few — say so instead of showing a blank panel. Use the "Open in EasyEDA Pro"/"Open in
+Results are one row per part: source, code or UUID, name, schematic value, description, the
+**symbol** and **footprint** names KiCad will use, package, JLCPCB part class, what the row is
+(device, symbol or standalone footprint) and who contributed it — so you can judge a part before
+importing it. Click a column heading to sort. **Items per page** sets how many rows a page holds
+(10 to 200). The **Narrow these results** box filters the page you already have without asking the
+server again — matching every column plus parameters and category tags — which is the quick way
+through a hundred near-identical results.
+
+Selecting a result shows its symbol and its footprint on their own tabs, with the part's
+parameters below. Drawings pan with a drag, zoom with the wheel and reset on a double-click.
+Hovering a pin or a pad names it — pin number, name and type; pad number, size, drill and layer —
+and a footprint gets a checkbox per copper and silkscreen layer, so you can look at one layer at a
+time. JLC parts are drawn by the plugin from the part's own document, which is what makes that
+detail available; EasyEDA's flat rendering is only used when a document cannot be read. EasyEDA
+Std parts show EasyEDA's picture, and **Render locally** switches them to the plugin's own drawing
+to get the same pin and layer detail (the setting sticks for the next part you select). Parts whose
+EasyEDA document is empty — placeholders and title-block entries, of which the public library holds
+a fair few — say so instead of showing a blank panel. Use the "Open in EasyEDA Pro"/"Open in
 EasyEDA Std" link for the interactive viewer.
 
 **KiCad does not name parts after the part number.** A symbol is named after its symbol
@@ -209,11 +220,15 @@ flatpak run --filesystem="$PWD" org.wxformbuilder.wxFormBuilder -g easyeda_lib_l
 Tests are plain `assert` scripts, run directly:
 
 ```
-python3 tests/test_offline.py     # pure logic, no network, always safe to run
-python3 tests/smoke_download.py   # downloads real parts, then has KiCad read them back
-python3 tests/smoke_preview.py    # opens the dialog and checks each preview branch
-python3 tests/smoke_dialog.py     # search, filter, sort, queue and a real download
+python3 tests/test_offline.py       # pure logic, no network, always safe to run
+python3 tests/smoke_layout.py       # the dialog's layout, no network
+python3 tests/smoke_queue_alias.py  # the queue and its Alias column, no network
+python3 tests/smoke_uuid_search.py  # what a pasted code, UUID or model UUID resolves to
+python3 tests/smoke_download.py     # downloads real parts, then has KiCad read them back
+python3 tests/smoke_preview.py      # opens the dialog and checks each preview branch
+python3 tests/smoke_dialog.py       # search, filter, sort, queue and a real download
 ```
 
-The smoke scripts need the network and KiCad's Python (`pcbnew`, and `wx` with WebView for the
-preview one); they write only to temporary directories.
+All of them run unattended. The smoke scripts need KiCad's Python (`pcbnew`, and `wx` with
+WebView for the preview one) and a display; the last four also need the network. They write
+only to temporary directories.

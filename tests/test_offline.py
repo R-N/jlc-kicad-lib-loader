@@ -805,6 +805,30 @@ def test_result_rows():
           "a std symbol is imported under its own title")
 
 
+def test_uuid_routing():
+    """Which queries are looked up instead of searched.
+
+    EasyEDA's keyword search indexes no uuid, so a uuid goes to a direct lookup -
+    but an LCSC code must keep going through the search, or every ordinary query
+    would resolve to at most one part.
+    """
+    ell = loaderModule()
+
+    for term in ["f58385f66b144586baef3753ba84f65d",
+                 "86c9a28785b84e52859c2af3e4e264a5",
+                 "std:191f82fa4cdb4362ace6b365bebb2565",
+                 "7E897495BBAF42C9A1E64C55011A8529"]:
+        check(ell.UUID_PATTERN.fullmatch(term) is not None, f"{term} not taken for a uuid")
+
+    for term in ["C15127", "AO3401A", "TO-92-3", "resistor 100k",
+                 # 31 and 33 hex digits are not uuids, and neither is a uuid with
+                 # anything else on the line.
+                 "f58385f66b144586baef3753ba84f65",
+                 "f58385f66b144586baef3753ba84f65dd",
+                 "f58385f66b144586baef3753ba84f65d please"]:
+        check(ell.UUID_PATTERN.fullmatch(term) is None, f"{term} mistaken for a uuid")
+
+
 def test_filter_and_sort():
     ell = loaderModule()
 
@@ -1161,6 +1185,7 @@ SECTIONS = [
     ("std_render, empty documents", test_std_empty_documents, ()),
     ("component_loader, Std library", test_std_library, ("requests", "pcbnew")),
     ("easyeda_lib_loader, result rows", test_result_rows, ("requests", "pcbnew", "wx")),
+    ("easyeda_lib_loader, uuid routing", test_uuid_routing, ("requests", "pcbnew", "wx")),
     ("easyeda_lib_loader, filter and sort", test_filter_and_sort, ("requests", "pcbnew", "wx")),
     ("easyeda_lib_loader, part queue", test_part_queue, ("requests", "pcbnew", "wx")),
     ("easyeda_lib_loader, queue aliases", test_queue_aliases, ("requests", "pcbnew", "wx")),
