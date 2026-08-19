@@ -1,0 +1,40 @@
+{
+ "uuid": "7e897495bbaf42c9a1e64c55011a8529",
+ "title": "MAX9814",
+ "docType": 2,
+ "thumb": "//image.easyeda.com/components/7e897495bbaf42c9a1e64c55011a8529.png",
+ "dataStr": {
+  "head": {
+   "docType": 2,
+   "c_para": {
+    "name": "MAX9814",
+    "package": "MAX9814",
+    "pre": "P3",
+    "catid": "20",
+    "timeStamp": "1457775852",
+    "sourceId": "1T5FDZYC8",
+    "Manufacturer Part": "?",
+    "spicePre": "P",
+    "Contributor": "doomscar"
+   },
+   "importedFrom": "EasyEDA",
+   "uuid": "7e897495bbaf42c9a1e64c55011a8529",
+   "utime": 1716757910
+  },
+  "canvas": "CA~1000~1000~#FFFFFF~yes~#CCCCCC~5~159.51~80~line~5~pixel~5~3000~4000",
+  "shape": [
+   "P~show~~1~2921~3980~180~^^2921~3980^^M 2921 3980 h 20~#880000^^1~2943~3983.25~0~GND~start~Verdana~7.0pt^^1~2936~3979~0~1~end~Verdana~7.0pt^^0^^0",
+   "P~show~~2~2921~3990~180~^^2921~3990^^M 2921 3990 h 20~#880000^^1~2943~3993~0~V+~start~Verdana~7.0pt^^1~2936~3989~0~2~end~Verdana~7.0pt^^0^^0",
+   "P~show~~3~2921~4000~180~^^2921~4000^^M 2921 4000 h 20~#880000^^1~2943~4003~0~GAIN~start~Verdana~7.0pt^^1~2936~3999~0~3~end~Verdana~7.0pt^^0^^0",
+   "P~show~~4~2921~4010~180~^^2921~4010^^M 2921 4010 h 20~#880000^^1~2943~4013~0~OUT~start~Verdana~7.0pt^^1~2936~4009~0~4~end~Verdana~7.0pt^^0^^0",
+   "R~2940.51~3960.42~5~5~140~80~#880000~1~0~",
+   "P~show~~5~2921~4020~180~^^2921~4020^^M 2921 4020 h 20~#880000^^1~2942.51~4023.42~0~AR~start~Verdana~7.0pt^^1~2935.51~4019.42~0~5~end~Verdana~7.0pt^^0^^0"
+  ],
+  "BBox": {
+   "x": 2921,
+   "y": 3960.42,
+   "width": 159.51000000000022,
+   "height": 80
+  }
+ }
+}

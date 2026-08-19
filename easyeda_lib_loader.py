@@ -76,10 +76,26 @@ def thumbUrl(result, uuid):
 
     return f"https://image.easyeda.com/components/{uuid}.png" if uuid else None
 
-def imageMarkup(url):
-    """<img> that removes itself when the source has no rendering."""
-    return (f'<img src="{url}" onerror="this.parentNode.style.display=\'none\'"/>'
-            if url else "")
+def imageMarkup(url, fallback=""):
+    """EasyEDA's own rendering of a Std document, as an <img>.
+
+    Not every document has one - a standalone footprint answers 404 on
+    image.easyeda.com - and the pane used to be left blank, because the handler
+    hid the image's parent and said nothing. When a local drawing of the same
+    document is available it takes over instead; the swap happens in the page, so
+    a missing picture costs no extra request.
+    """
+    if not url:
+        return fallback
+
+    swap = ("this.style.display='none';"
+            "var alt=document.getElementById('alt');"
+            "if (alt) { alt.style.display='block';"
+            " if (window.rebuildLayers) window.rebuildLayers(); }"
+            "else this.parentNode.style.display='none';")
+
+    return (f'<img src="{url}" onerror="{swap}"/>'
+            + (f'<div id="alt" style="display:none">{fallback}</div>' if fallback else ""))
 
 def productSvgs(code):
     """Symbol and footprint drawings of an LCSC part, as inline SVG markup.
@@ -254,22 +270,38 @@ DRAWING_PAGE = """<!DOCTYPE html><html><head><meta charset="utf-8"><style>
     vp.addEventListener('mouseleave', unhover);
 
     // ---- footprint layers: one checkbox per layer actually drawn -------------
+    // Only the drawing on screen. When EasyEDA's picture is shown, our own drawing
+    // of the same document sits hidden behind it as the broken-image fallback, and
+    // a panel built from that would switch layers nobody can see.
     var panel = document.getElementById('layers');
-    var seen = {}, order = [];
 
-    Array.prototype.forEach.call(cv.querySelectorAll('g[data-layer]'), function (g) {
-        var id = g.dataset.layer;
+    function rebuildLayers() {
+        var seen = {}, order = [];
+        panel.textContent = '';
+        panel.classList.add('empty');
+        // Visibility decides, not position in the tree: our drawing may be sitting
+        // hidden behind EasyEDA's picture as the broken-image fallback, and a panel
+        // built from that would switch layers nobody can see.
+        Array.prototype.forEach.call(cv.querySelectorAll('g[data-layer]'), function (g) {
+            if (!g.getClientRects().length) {
+                return;
+            }
 
-        if (!seen[id]) {
-            seen[id] = { name: g.dataset.layername || ('Layer ' + id), groups: [] };
-            order.push(id);
+            var id = g.dataset.layer;
+
+            if (!seen[id]) {
+                seen[id] = { name: g.dataset.layername || ('Layer ' + id), groups: [] };
+                order.push(id);
+            }
+
+            seen[id].groups.push(g);
+        });
+
+        // A symbol has no layers at all, and one lone layer is not worth a panel.
+        if (order.length < 2) {
+            return;
         }
 
-        seen[id].groups.push(g);
-    });
-
-    // A symbol has no layers at all, and one lone layer is not worth a panel.
-    if (order.length > 1) {
         panel.classList.remove('empty');
         order.forEach(function (id) {
             var entry = seen[id];
@@ -297,6 +329,13 @@ DRAWING_PAGE = """<!DOCTYPE html><html><head><meta charset="utf-8"><style>
             panel.appendChild(label);
         });
     }
+
+    // The image's onerror handler reveals the local drawing and calls this. It can
+    // fire while the document is still parsing, before this script exists, so the
+    // panel is built again once everything has settled.
+    window.rebuildLayers = rebuildLayers;
+    rebuildLayers();
+    window.addEventListener('load', rebuildLayers);
 })();
 </script></body></html>"""
 
@@ -514,6 +553,7 @@ import wx.dataview
 
 from .component_loader import *
 from . import pro_render
+from . import std_render
 from .easyeda_lib_loader_dialog import EasyEdaLibLoaderDialog
 from .config_manager import ConfigManager, LibraryTableManager
 
@@ -1053,7 +1093,11 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
             # "has" is what the part owns, which is not the same as what could be
             # drawn: a document that exists but fails to render still means the part
             # has one, and the tab must not run away from it.
+            # "local*" is our own drawing of the document, kept beside whatever the
+            # pane shows by default. For Std that default is EasyEDA's picture, so the
+            # two are different and the Render button switches between them.
             data = {"title": "", "attributes": {}, "links": [], "symbol": "", "footprint": "",
+                    "localSymbol": "", "localFootprint": "",
                     "hasSymbol": False, "hasFootprint": False, "problems": {}}
 
             if itemCode.startswith(STD_PREFIX):
@@ -1076,13 +1120,17 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
                         # symbol whatsoever. Drawing it on the Symbol tab promised a
                         # symbol the library will not contain.
                         data["hasFootprint"] = True
-                        data["footprint"] = imageMarkup(thumbUrl(result, stdUuid))
+                        data["localFootprint"] = std_render.footprintSvg(result.get("dataStr"))
+                        data["footprint"] = imageMarkup(thumbUrl(result, stdUuid),
+                                                        data["localFootprint"])
                         data["problems"]["symbol"] = "This document is a footprint on its own."
                         kicadNames = {"Footprint in KiCad": attributes.get("package")
                                       or result.get("title", "")}
                     else:
                         data["hasSymbol"] = True
-                        data["symbol"] = imageMarkup(thumbUrl(result, stdUuid))
+                        data["localSymbol"] = std_render.symbolSvg(result.get("dataStr"))
+                        data["symbol"] = imageMarkup(thumbUrl(result, stdUuid),
+                                                     data["localSymbol"])
                         kicadNames = {"Symbol in KiCad": attributes.get("spiceSymbolName")
                                       or result.get("title", "")}
                         named = attributes.get("package")
@@ -1105,7 +1153,9 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
                             kicadNames["Footprint in KiCad"] = (
                                 (package.get("dataStr") or {}).get("head", {})
                                 .get("c_para", {}).get("package") or package.get("title", ""))
-                            data["footprint"] = imageMarkup(thumbUrl(package, package.get("uuid")))
+                            data["localFootprint"] = std_render.footprintSvg(package.get("dataStr"))
+                            data["footprint"] = imageMarkup(thumbUrl(package, package.get("uuid")),
+                                                            data["localFootprint"])
 
                     data["attributes"] = {**kicadNames, **attributes}
                 except Exception as e:
@@ -1167,6 +1217,7 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
                 drawings, problems = proDrawings(
                     attributes.get('Symbol'), attributes.get('Footprint'))
                 data["symbol"], data["footprint"] = drawings["symbol"], drawings["footprint"]
+                data["localSymbol"], data["localFootprint"] = data["symbol"], data["footprint"]
                 data["problems"] = problems
 
                 if not data["symbol"] and not data["footprint"]:
@@ -1186,15 +1237,43 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
         # The notebook's page order, so the rule below can index it.
         SYMBOL_PAGE, FOOTPRINT_PAGE = 0, 1
 
+        # Sticky across selections: someone who wants drawings they can hover wants
+        # them for the next part too, not once.
+        renderLocal = [False]
+
+        def paneMarkup( data ):
+            """(symbol, footprint) markup for the mode the user is in."""
+            if not renderLocal[0]:
+                return data["symbol"], data["footprint"]
+
+            return (data["localSymbol"] or data["symbol"],
+                    data["localFootprint"] or data["footprint"])
+
+        def refreshRenderButton( data ):
+            """The button offers the drawing that is not currently on screen."""
+            local = bool(data["localSymbol"] or data["localFootprint"])
+            # EasyEDA's own picture is only worth offering back when it differs from
+            # our drawing, which is exactly the Std case.
+            picture = (data["symbol"] != data["localSymbol"]
+                       or data["footprint"] != data["localFootprint"])
+            dlg.m_renderBtn.SetLabel("Show EasyEDA image" if renderLocal[0]
+                                     else "Render locally")
+            dlg.m_renderBtn.Enable(local and picture)
+            dlg.m_drawingsPanel.Layout()
+
         def applyPreview( itemCode, data ):
             """Put one fetched preview on screen."""
             dlg.m_partTitle.SetLabel(data["title"] or itemCode)
             setLinks(*data["links"])
             setParams(data["attributes"])
-            showDrawing(self.symbolView, data["symbol"], "symbol",
+            symbol, footprint = paneMarkup(data)
+            showDrawing(self.symbolView, symbol, "symbol",
                         data["problems"].get("symbol", ""))
-            showDrawing(self.footprintView, data["footprint"], "footprint",
+            showDrawing(self.footprintView, footprint, "footprint",
                         data["problems"].get("footprint", ""))
+            refreshRenderButton(data)
+            self.previewData = data
+            self.previewCode = itemCode
 
             # Leave the chosen tab alone unless this part cannot fill it at all. Keyed
             # on the documents the part *owns*, never on what was drawn: a footprint
@@ -1208,6 +1287,19 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
                 dlg.m_previewNotebook.SetSelection(other)
 
             dlg.m_detailsPanel.Layout()
+
+        def onRenderToggle( event ):
+            """Switch between EasyEDA's picture and our own drawing of the document.
+
+            Nothing is fetched: both were built when the part was selected, so this
+            is a repaint. EasyEDA has no drawing for a Pro document, and ours has the
+            pin, pad and layer metadata theirs cannot carry.
+            """
+            renderLocal[0] = not renderLocal[0]
+            data = getattr(self, "previewData", None)
+
+            if data:
+                applyPreview(getattr(self, "previewCode", ""), data)
 
         def onSearchItemSelected( event ):
             itemCode = dlg.m_searchResultsTree.GetItemText(event.GetItem(), 1)
@@ -1340,10 +1432,12 @@ class EasyEDALibLoaderPlugin(ActionPlugin):
         dlg.m_queueClearBtn.Bind(wx.EVT_BUTTON, onQueueClear)
         dlg.m_queueList.Bind(wx.EVT_LIST_ITEM_ACTIVATED, onQueueAlias)
         dlg.m_browseBtn.Bind(wx.EVT_BUTTON, onBrowse)
+        dlg.m_renderBtn.Bind(wx.EVT_BUTTON, onRenderToggle)
 
         # Reachable for tests: a simulated click only lands when the window really
         # holds focus, which is not true in every environment tests run in.
         self.onSearchItemSelected = onSearchItemSelected
+        self.onRenderToggle = onRenderToggle
         self.onSearch = onSearch
         self.onDownload = onDownload
         self.addRows = addRows

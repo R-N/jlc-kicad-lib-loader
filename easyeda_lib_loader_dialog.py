@@ -255,6 +255,12 @@ class EasyEdaLibLoaderDialog ( wx.Dialog ):
 
 		bSizerDrawings.Add( self.m_previewNotebook, 1, wx.EXPAND|wx.ALL, 4 )
 
+		self.m_renderBtn = wx.Button( self.m_drawingsPanel, wx.ID_ANY, u"Render locally", wx.DefaultPosition, wx.DefaultSize, 0 )
+		self.m_renderBtn.Enable( False )
+		self.m_renderBtn.SetToolTip( u"Draw the EasyEDA document here instead of showing the picture from their site. A local drawing can be hovered for pin and pad details, and its footprint layers can be switched off." )
+
+		bSizerDrawings.Add( self.m_renderBtn, 0, wx.ALIGN_RIGHT|wx.RIGHT|wx.BOTTOM, 4 )
+
 
 		self.m_drawingsPanel.SetSizer( bSizerDrawings )
 		self.m_drawingsPanel.Layout()

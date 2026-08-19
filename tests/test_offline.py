@@ -923,6 +923,90 @@ def test_drawing_page():
           "the empty-document page must carry a note and no drawing")
 
 
+# --------------------------------------------------------------------------
+# std_render: EasyEDA Std documents, drawn locally
+# --------------------------------------------------------------------------
+
+def stdFixture(name):
+    with open(os.path.join(FIXTURES, name), encoding="utf-8") as handle:
+        return json.load(handle)["dataStr"]
+
+
+def test_std_symbol():
+    import std_render
+
+    # MAX9814, uuid 7e897495…: five pins and one body rectangle, nothing else.
+    svg = std_render.symbolSvg(stdFixture("std_max9814_symbol.json"))
+    check(svg.startswith("<svg") and svg.endswith("</svg>"), "no SVG produced")
+
+    pins = re.findall(r'<g data-kind="pin" data-number="(\d+)" data-name="([^"]*)"', svg)
+    check(pins == [("1", "GND"), ("2", "V+"), ("3", "GAIN"), ("4", "OUT"), ("5", "AR")],
+          f"pin metadata is {pins}")
+
+    # Y is NOT flipped for Std - neither EasyEDA nor KiCad's Std importer negates it.
+    # Pin 1 is at y 3980 in the document, so it must be at y 3980 in the drawing;
+    # a Pro-style flip would put it at -3980.
+    first = svg[svg.index('data-number="1"'):]
+    check('y1="3980.000"' in first[:400], "pin 1 is not at the document's own Y")
+    check(svg.count("<line") == 10, f"expected 5 pin lines and 5 hover targets, got"
+                                    f" {svg.count('<line')}")
+    check('stroke-opacity="0"' in svg and 'pointer-events="stroke"' in svg,
+          "pins have no invisible hover target")
+    check(svg.count("<rect") == 1, "the body rectangle is missing")
+    check("data-layer=" not in svg, "a symbol must not carry layer groups")
+    check(sorted(texts(svg)) == sorted(["1", "2", "3", "4", "5", "AR", "GAIN", "GND",
+                                        "OUT", "V+"]), f"texts are {sorted(texts(svg))}")
+
+
+def test_std_footprint():
+    import std_render
+
+    # TYPE-C-SMD_USB-AMALECONNECTOR, uuid 191f82fa…: 4 SMD pads, 2 slotted
+    # through-hole pads, 2 bare holes, 4 tracks, 3 circles, 11 solid regions.
+    svg = std_render.footprintSvg(stdFixture("std_typec_footprint.json"))
+    check(svg.startswith("<svg"), "no SVG produced")
+
+    pads = re.findall(r'<g data-kind="pad" data-number="(\d+)" data-size="([^"]*)"'
+                      r'(?: data-drill="([^"]*)")?', svg)
+    check(len(pads) == 6, f"expected 6 pads, got {len(pads)}")
+    # 3.937 x 7.0866 document units at 10 mil each: pinned in millimetres, because
+    # that is the number the tooltip shows and a wrong unit is invisible otherwise.
+    check(pads[0][1] == "1.000 × 1.800 mm", f"SMD pad size is {pads[0][1]!r}")
+    slotted = [pad for pad in pads if pad[2]]
+    check(len(slotted) == 2, "the two slotted pads report no drill")
+    check(slotted[0][2] == "0.700 mm × 2.300 mm", f"slot drill is {slotted[0][2]!r}")
+
+    layers = sorted(set(re.findall(r'<g data-layer="(\d+)" data-layername="([^"]*)"', svg)))
+    check(layers == [("1", "TopLayer"), ("10", "BoardOutLine"), ("11", "Multi-Layer"),
+                     ("3", "TopSilkLayer")], f"layer groups are {layers}")
+
+    # Pad 4 is centred at y 3000.5 and is 7.0866 tall, so its rect starts at
+    # 3000.5 - 3.5433. Y is not negated, and the pad is not drawn from its corner.
+    padFour = re.search(r'<g data-kind="pad" data-number="4"[^>]*>(<rect[^>]*>)', svg)
+    check(padFour and 'y="2996.957"' in padFour.group(1),
+          f"pad 4 rect is {padFour.group(1) if padFour else None}")
+    check('fill="#FF0000"' in svg, "top copper is not the document's own colour")
+    # Pads come last so silkscreen cannot cover them.
+    check(svg.index('data-kind="pad"') > svg.index('data-layername="TopSilkLayer"'),
+          "pads are drawn before the silkscreen")
+
+
+def test_std_empty_documents():
+    import std_render
+
+    for name, value in (("None", None), ("empty dict", {}), ("no shapes", {"shape": []}),
+                        ("junk shapes", {"shape": ["", "NOPE~1~2", "PAD~"]}),
+                        ("wrong type", {"shape": "PAD~RECT~1~2"})):
+        check(std_render.symbolSvg(value) == "", f"symbol of {name} is not empty")
+        check(std_render.footprintSvg(value) == "", f"footprint of {name} is not empty")
+
+    # A document holding only layers and no geometry has nothing to draw either.
+    check(std_render.footprintSvg({"layers": ["1~TopLayer~#FF0000~true~false~true~"],
+                                   "shape": []}) == "", "a layers-only document drew something")
+    check(std_render._mm(3.937) == "1.000 mm", f"unit conversion: {std_render._mm(3.937)}")
+    check(std_render._mm(0) == "0.000 mm", "zero should still be a millimetre string")
+
+
 SECTIONS = [
     ("pro_render, real document", test_real_document, ()),
     ("pro_render, axis and units", test_y_axis_and_units, ()),
@@ -931,6 +1015,9 @@ SECTIONS = [
     ("pro_render, pads and layers", test_pad_shapes_and_holes, ()),
     ("pro_render, contours", test_contour_primitives, ()),
     ("pro_render, empty documents", test_empty_and_broken_documents, ()),
+    ("std_render, symbol", test_std_symbol, ()),
+    ("std_render, footprint", test_std_footprint, ()),
+    ("std_render, empty documents", test_std_empty_documents, ()),
     ("component_loader, Std library", test_std_library, ("requests", "pcbnew")),
     ("easyeda_lib_loader, result rows", test_result_rows, ("requests", "pcbnew", "wx")),
     ("easyeda_lib_loader, filter and sort", test_filter_and_sort, ("requests", "pcbnew", "wx")),

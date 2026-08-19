@@ -237,8 +237,11 @@ for name, html in panels.items():
 panels = selectRow(STD_PART)
 report("std", panels)
 for name, html in panels.items():
-    assert drawings(html) == 1, f"{name} panel holds {drawings(html)} thumbnails, expected 1"
-    assert "<img" in html, f"{name} should be an EasyEDA thumbnail"
+    assert html.count("<img") == 1, f"{name} panel holds {html.count('<img')} thumbnails"
+    # Behind EasyEDA's picture sits our own drawing of the same document, hidden: it
+    # takes over if the picture 404s, and the Render button switches to it on demand.
+    assert 'id="alt"' in html, f"{name} panel has no local drawing to fall back on"
+    assert 'style="display:none"' in html, f"{name} panel shows both drawings at once"
 assert "easyeda.com/component/" in link.GetURL(), f"Std viewer link: {link.GetURL()}"
 assert link.GetLabel() == "Open in EasyEDA Std", f"link label: {link.GetLabel()}"
 
@@ -247,9 +250,11 @@ notebook.SetSelection(0)          # a footprint-only part must pull us off Symbo
 panels = selectRow(STD_FOOTPRINT)
 report("std, footprint", panels)
 # docType 4 is a standalone footprint document: it *is* the footprint and has no
-# symbol. It used to be drawn on the Symbol tab as well, promising a symbol that
-# the library will not contain.
-assert drawings(panels["footprint"]) == 1, "the footprint pane holds no thumbnail"
+# symbol. It used to be drawn on the Symbol tab as well, promising a symbol that the
+# library will not contain. EasyEDA has no picture for a standalone footprint - the
+# thumbnail 404s - so the local drawing behind it is what ends up on screen.
+assert panels["footprint"].count("<img") == 1, "the footprint pane holds no thumbnail"
+assert 'id="alt"' in panels["footprint"], "no local drawing behind the missing picture"
 assert drawings(panels["symbol"]) == 0, "a footprint-only document drew a symbol"
 assert 'class="note"' in panels["symbol"], "the symbol pane is blank with no explanation"
 assert notebook.GetPageText(notebook.GetSelection()) == "Footprint", \
@@ -295,10 +300,42 @@ panels = selectRow(STD_DANGLING)
 report("std, dangling", panels)
 assert notebook.GetPageText(notebook.GetSelection()) == "Footprint", \
     "a named-but-missing footprint moved the user off the Footprint tab"
-assert drawings(panels["symbol"]) == 1, "the symbol thumbnail is missing"
+assert panels["symbol"].count("<img") == 1, "the symbol thumbnail is missing"
 assert drawings(panels["footprint"]) == 0, "a footprint was drawn for a missing document"
 assert "MAX9814" in panels["footprint"], \
     f"the footprint pane does not name what is missing: {panels['footprint'][:200]}"
+
+# The Render button: EasyEDA has a picture for a Std document, so that is what the
+# pane shows, and this switches to our own drawing of the same document - which is
+# the only one that can be hovered or have its layers switched off. Nothing is
+# fetched for it: both drawings were built when the part was selected.
+notebook.SetSelection(0)
+panels = selectRow(STD_PART)
+assert "<img" in panels["symbol"], "the Std pane does not start from EasyEDA's picture"
+assert dialog.m_renderBtn.IsEnabled(), "the Render button is dead on a Std part"
+assert dialog.m_renderBtn.GetLabel() == "Render locally", \
+    f"button reads {dialog.m_renderBtn.GetLabel()!r}"
+
+before = time.time()
+plugin.onRenderToggle(None)
+pump(1.5)
+switched = readPanels()
+print(f"render locally    -> symbol: {drawings(switched['symbol'])} drawing, "
+      f"footprint: {drawings(switched['footprint'])} drawing, "
+      f"{(time.time() - before) * 1000:.0f}ms")
+assert time.time() - before < 3.0, "switching to the local drawing went to the network"
+assert "<img" not in switched["symbol"], "the symbol pane still shows EasyEDA's picture"
+assert "<svg" in switched["symbol"], "no local drawing appeared"
+assert "data-kind" in switched["symbol"], "the local drawing carries no hoverable metadata"
+assert dialog.m_renderBtn.GetLabel() == "Show EasyEDA image", "the button did not flip"
+
+# Sticky: the mode is a preference, not a one-shot, so the next part keeps it.
+panels = selectRow(STD_FOOTPRINT)
+assert "<img" not in panels["footprint"], "a new part reverted to EasyEDA's picture"
+assert "data-layer" in panels["footprint"], "the local footprint has no layer groups"
+plugin.onRenderToggle(None)
+pump(1.2)
+assert dialog.m_renderBtn.GetLabel() == "Render locally", "the button did not flip back"
 
 # Selecting a part must cost the UI nothing, and selecting it twice must cost
 # nothing at all: the fetch runs on a thread and its result is cached.
